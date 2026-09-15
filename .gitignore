@@ -1,0 +1,19 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+
+# Yerel ayarlar — gizli anahtar buraya yazılır, asla commit edilmez
+appsettings.Development.json
+appsettings.*.local.json
+.env
+
+# Editör
+.vs/
+.vscode/
+.idea/
+
+# İşletim sistemi
+.DS_Store
+Thumbs.db
