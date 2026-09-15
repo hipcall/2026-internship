@@ -224,4 +224,4 @@ Gözden geçirmede soracağım:
 
 ---
 
-**Sonraki ödev:** [`07-cagri-sonrasi-otomasyon.md`](07-cagri-sonrasi-otomasyon.md)
+**Sonraki ödev:** [`07-cevapsiz-cagri.md`](07-cevapsiz-cagri.md)

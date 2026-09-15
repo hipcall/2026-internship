@@ -34,23 +34,28 @@ yok. Burada üretilen yazılar o boşluğu dolduruyor.
 | 04 | [Webhook Alıcısı](tasks/04-webhook-alicisi.md) | Olay tabanlı entegrasyon, çağrı kaydı arşivi |
 | 05 | [Insight Card](tasks/05-insight-card.md) | Ajan ekranına canlı müşteri bilgisi |
 | 06 | [Kişi ve Firma Senkronu](tasks/06-kisi-firma-senkronu.md) | `external_id`, upsert, özel alanlar |
-| 07 | [Çağrı Sonrası Otomasyon](tasks/07-cagri-sonrasi-otomasyon.md) | Sonuç kodu, etiket, yorum, görev |
-| 08 | [External Management](tasks/08-external-management.md) | Kendi servisinle çağrı yönlendirme |
+| 07 | [Cevapsız Çağrı](tasks/07-cevapsiz-cagri.md) | Sonuç kodu + takip görevi |
+| 08 | [Kısa Çağrı Etiketleme](tasks/08-kisa-cagri-etiketleme.md) | Süre alanları, etiketler |
+| 09 | [Arayan Özeti Yorumu](tasks/09-arayan-ozeti-yorumu.md) | Kimlik eşleştirme, kalıcı not |
+| 10 | [External Management](tasks/10-external-management.md) | Kendi servisinle çağrı yönlendirme |
 
 Bir ödev teslim edilip gözden geçirilmeden sonrakine geçilmez. Her ödev bir
 öncekinin üstüne kuruluyor.
 
 ### Çıktı
 
-Sekiz ödevin sonunda ortaya çıkan: 8 çalışma notu, 16 blog yazısı (EN + TR),
-6 çalışan C# örneği ve community'de kalıcı soru-cevap kaydı.
+On ödevin sonunda ortaya çıkan: 10 çalışma notu, 20 blog yazısı (EN + TR),
+7 çalışan C# projesi ve community'de kalıcı soru-cevap kaydı.
+
+Ödev 07, 08 ve 09 bir seri: üçü de aynı webhook alıcısının üstüne birer kural
+ekliyor ve tek bir C# projesinde birikiyor.
 
 ### Gereçler
 
 - **Dil:** C# / .NET (en az .NET 8). Ödev 1 `curl` ile, sonrakiler C# ile.
 - **Ortam:** DEMO hesabı, ngrok (Ödev 4'ten itibaren), gelen çağrı alabilen bir
   numara (Ödev 8).
-- **Önceden istenmesi gereken:** Ödev 8 için kendine ayrılmış, akışını
+- **Önceden istenmesi gereken:** Ödev 10 için kendine ayrılmış, akışını
   değiştirebileceğin bir gelen numara. Ödevden **önce** iste.
 
 ## Nasıl çalışıyoruz

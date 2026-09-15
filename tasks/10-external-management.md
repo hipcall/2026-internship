@@ -1,8 +1,8 @@
-# Ödev 8 — External Management: Çağrıyı Kendi Servisinizle Yönlendirmek
+# Ödev 10 — External Management: Çağrıyı Kendi Servisinizle Yönlendirmek
 
 **Tahmini süre:** 5 gün
 **Zorluk:** Zor — programın en zorlu ödevi.
-**Ön koşul:** [`07-cagri-sonrasi-otomasyon.md`](07-cagri-sonrasi-otomasyon.md) teslim edilmiş olmalı.
+**Ön koşul:** [`09-arayan-ozeti-yorumu.md`](09-arayan-ozeti-yorumu.md) teslim edilmiş olmalı.
 
 ---
 
@@ -26,7 +26,7 @@ telefon açman gerekiyor.
 
 ## Ön koşullar
 
-- Ödev 1–7 tamam.
+- Ödev 1–9 tamam.
 - ngrok veya internete açık bir sunucu.
 - DEMO'da **gelen çağrı alabileceğin bir dış numara** ve o numaranın akışını
   düzenleme yetkisi. Bu ödevde şart — yoksa Onur'dan iste, ödeve başlama.
@@ -127,7 +127,7 @@ Uygulamanın karşılaması gereken durumlar:
 
 PIN listesi olarak 5 kayıtlık bir sözlük yeterli. Gerçek veritabanı kurma.
 
-Teslim: `submissions/08-external-management/Hipcall.ExternalManagement/`
+Teslim: `submissions/10-external-management/Hipcall.ExternalManagement/`
 
 ---
 
@@ -147,7 +147,7 @@ Bu ödevde community kullanımı zorunlu, çünkü sözleşmenin bir kısmını 
 
 ### F1. Çalışma notu
 
-`submissions/08-external-management.md`
+`submissions/10-external-management.md`
 
 Bu notun diğerlerinden daha kapsamlı olması gerekiyor. İçinde:
 
@@ -258,11 +258,11 @@ Soracağım soru:
 
 ## Sonrası
 
-Bu, programın şu anki son ödevi. Sekiz ödevin sonunda ortaya çıkanlar:
+Bu, programın şu anki son ödevi. On ödevin sonunda ortaya çıkanlar:
 
-- 8 çalışma notu — ölçülmüş, belgelenmiş API davranışı
-- 16 blog yazısı (EN + TR), yayına hazır
-- 6 çalışan C# örneği
+- 10 çalışma notu — ölçülmüş, belgelenmiş API davranışı
+- 20 blog yazısı (EN + TR), yayına hazır
+- 7 çalışan C# projesi
 - Community'de kalıcı soru-cevap kaydı
 
 Bunların hiçbiri bizde önceden yoktu.
