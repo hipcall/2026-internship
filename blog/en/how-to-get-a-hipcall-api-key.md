@@ -1,5 +1,5 @@
 ---
-title: "How to Get a Hipcall API Key and Make Your First Request"
+title: "How to Get a HipCall API Key and Make Your First Request"
 description: "Create an API key in the dashboard, make your first authenticated request, and understand what comes back."
 slug: how-to-get-a-hipcall-api-key
 lang: en
@@ -18,13 +18,13 @@ status: draft
 
 ## Overview
 
-This guide shows you how to create a Hipcall API key and make your first authenticated request to the profile endpoint. You will also learn what a successful response looks like and how to handle common authentication errors.
+This guide shows you how to create a HipCall API key and make your first authenticated request to the profile endpoint. You will also learn what a successful response looks like and how to handle common authentication errors.
 
 ## Before you start
 
-You need a Hipcall user account with the **Admin** or **Founder** role to access the developer settings and create an API key. Users with **Standard** or **Authorized** roles cannot access these settings.
+You need a HipCall user account with the **Admin** or **Founder** role to access the developer settings and create an API key. Users with **Standard** or **Authorized** roles cannot access these settings.
 
-1. Log in to your Hipcall dashboard at `https://use.hipcall.com.tr/`.
+1. Log in to your HipCall dashboard at `https://use.hipcall.com.tr/`.
 2. Open **Settings > Developer**.
 3. Open the **API** section.
 4. Click **New** to create an API key.
@@ -33,7 +33,7 @@ You need a Hipcall user account with the **Admin** or **Founder** role to access
 
 The default expiration period is one year. You can select an expiration date up to three years in the future.
 
-After the API key is created, Hipcall displays the full secret key on the screen. Store it somewhere secure before leaving the page. You cannot view the full key again after the page is closed. The API token list displays a masked version instead.
+After the API key is created, HipCall displays the full secret key on the screen. Store it somewhere secure before leaving the page. You cannot view the full key again after the page is closed. The API token list displays a masked version instead.
 
 If you lose the key, delete the token and create a new one.
 
@@ -200,6 +200,6 @@ The profile endpoint does not require a request body. Authentication is provided
 
 ## Next steps
 
-Explore the [Hipcall API Reference](https://use.hipcall.com/api-docs/) to learn about the available endpoints.
+Explore the [HipCall API Reference](https://use.hipcall.com/api-docs/) to learn about the available endpoints.
 
-Ask questions or share your integration experience in the [Hipcall Community](https://community.hipcall.com/).
+Ask questions or share your integration experience in the [HipCall Community](https://community.hipcall.com/).

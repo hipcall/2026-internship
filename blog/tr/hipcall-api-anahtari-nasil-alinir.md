@@ -1,5 +1,5 @@
 ---
-title: "Hipcall API anahtarı nasıl alınır ve ilk istek nasıl gönderilir?"
+title: "HipCall API anahtarı nasıl alınır ve ilk istek nasıl gönderilir?"
 description: "Panelden API anahtarı oluşturun, kimlik doğrulamalı ilk isteğinizi gönderin ve dönen cevabı inceleyin."
 slug: hipcall-api-anahtari-nasil-alinir
 lang: tr
@@ -18,13 +18,13 @@ status: draft
 
 ## Genel bakış
 
-Bu rehberde Hipcall API anahtarı oluşturmayı ve profil endpoint'ine kimlik doğrulamalı ilk isteğinizi göndermeyi öğreneceksiniz. Ayrıca başarılı bir cevabın nasıl göründüğünü ve yaygın kimlik doğrulama hatalarını nasıl ele alacağınızı göreceksiniz.
+Bu rehberde HipCall API anahtarı oluşturmayı ve profil endpoint'ine kimlik doğrulamalı ilk isteğinizi göndermeyi öğreneceksiniz. Ayrıca başarılı bir cevabın nasıl göründüğünü ve yaygın kimlik doğrulama hatalarını nasıl ele alacağınızı göreceksiniz.
 
 ## Başlamadan önce
 
 API anahtarı oluşturmak için **Yönetici** veya **Kurucu** rolüne sahip bir kullanıcı hesabınız olmalıdır. **Standart** ve **Yetkili** rollerine sahip kullanıcılar geliştirici ayarlarına erişemez.
 
-1. `https://use.hipcall.com.tr/` adresinden Hipcall paneline giriş yapın.
+1. `https://use.hipcall.com.tr/` adresinden HipCall paneline giriş yapın.
 2. **Ayarlar > Geliştirici** menüsünü açın.
 3. **API** bölümünü açın.
 4. Yeni bir API anahtarı oluşturmak için **Yeni** butonuna tıklayın.
@@ -33,7 +33,7 @@ API anahtarı oluşturmak için **Yönetici** veya **Kurucu** rolüne sahip bir 
 
 Varsayılan geçerlilik süresi bir yıldır. Son geçerlilik tarihini en fazla üç yıl sonrasına kadar seçebilirsiniz.
 
-API anahtarı oluşturulduktan sonra Hipcall gizli anahtarın tamamını ekranda gösterir. Sayfadan ayrılmadan önce anahtarı güvenli bir yerde saklayın. Sayfayı kapattıktan sonra anahtarın tamamını tekrar görüntüleyemezsiniz. API anahtarı listesinde anahtarın maskelenmiş hâli gösterilir.
+API anahtarı oluşturulduktan sonra HipCall gizli anahtarın tamamını ekranda gösterir. Sayfadan ayrılmadan önce anahtarı güvenli bir yerde saklayın. Sayfayı kapattıktan sonra anahtarın tamamını tekrar görüntüleyemezsiniz. API anahtarı listesinde anahtarın maskelenmiş hâli gösterilir.
 
 Anahtarı kaybederseniz mevcut anahtarı silip yeni bir API anahtarı oluşturun.
 
@@ -201,6 +201,6 @@ Profil endpoint'i bir istek gövdesi gerektirmez. Kimlik doğrulama `Authorizati
 
 ## Sonraki adımlar
 
-Diğer endpoint'leri incelemek için [Hipcall API Referansı](https://use.hipcall.com/api-docs/) sayfasını ziyaret edin.
+Diğer endpoint'leri incelemek için [HipCall API Referansı](https://use.hipcall.com/api-docs/) sayfasını ziyaret edin.
 
-Sorular sormak veya entegrasyon deneyiminizi paylaşmak için [Hipcall Community](https://community.hipcall.com/) sayfasına gidin.
+Sorular sormak veya entegrasyon deneyiminizi paylaşmak için [HipCall Community](https://community.hipcall.com/) sayfasına gidin.

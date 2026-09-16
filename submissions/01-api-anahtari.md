@@ -15,7 +15,7 @@
 
 **3. Kayıt Sonrası Görünürlük**
 * Anahtar oluşturulduktan sonra ekranda anahtar kodu, "Tamam" butonu ve şu uyarı metni yer alır:
-  > "Lütfen bu gizli anahtarı güvenli ve erişilebilir bir yere saklayın. Güvenlik nedeniyle bunu Hipcall hesabınız üzerinden tekrar görüntüleyemeyeceksiniz. Bu gizli anahtarı kaybederseniz yeni bir tane oluşturmanız gerekecektir."
+  > "Lütfen bu gizli anahtarı güvenli ve erişilebilir bir yere saklayın. Güvenlik nedeniyle bunu HipCall hesabınız üzerinden tekrar görüntüleyemeyeceksiniz. Bu gizli anahtarı kaybederseniz yeni bir tane oluşturmanız gerekecektir."
 * İlgili sayfa kapatıldıktan sonra API anahtarının tam hâli bir daha görüntülenemez. Liste ekranında anahtarın tam metni yerine maskelenmiş bir versiyonu yer alır.
 
 **4. Anahtar Silme İşlemi**
@@ -127,8 +127,8 @@ Başarılı isteğin başlıklarında (Headers) limit bilgileri dönmektedir:
 ```mermaid
 sequenceDiagram
     participant D as Developer
-    participant P as Hipcall Panel
-    participant A as Hipcall API (use.hipcall.com.tr)
+    participant P as HipCall Panel
+    participant A as HipCall API (use.hipcall.com.tr)
     
     D->>P: Ayarlar > Geliştirici > API menüsüne gir
     D->>P: Yeni anahtar oluştur
