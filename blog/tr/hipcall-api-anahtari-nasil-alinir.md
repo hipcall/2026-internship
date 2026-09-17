@@ -1,5 +1,5 @@
 ---
-title: "HipCall API anahtarı nasıl alınır ve ilk istek nasıl gönderilir?"
+title: "Hipcall API anahtarı nasıl alınır ve ilk istek nasıl gönderilir?"
 description: "Panelden API anahtarı oluşturun, kimlik doğrulamalı ilk isteğinizi gönderin ve dönen cevabı inceleyin."
 slug: hipcall-api-anahtari-nasil-alinir
 lang: tr
@@ -84,20 +84,20 @@ Cevap, `data` nesnesi altında kimliği doğrulanan kullanıcı, izinler, yetene
       "numbers": [
         {
           "id": 939,
-          "name": "Alt yönetici",
+          "name": "Sub Manager",
           "number": "+90850XXXXXXX",
           "country": "TR"
         },
         {
           "id": 938,
-          "name": "Üst yönetici",
+          "name": "Super Manager",
           "number": "+90850XXXXXXX",
           "country": "TR"
         }
       ],
       "default_number": {
         "id": 938,
-        "name": "Üst yönetici",
+        "name": "Super Manager",
         "number": "+90850XXXXXXX",
         "country": "TR"
       },

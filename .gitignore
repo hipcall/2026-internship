@@ -17,3 +17,7 @@ appsettings.*.local.json
 # İşletim sistemi
 .DS_Store
 Thumbs.db
+
+# submissions (.NET build çıktıları)
+**/bin/
+**/obj/

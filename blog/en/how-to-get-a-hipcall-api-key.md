@@ -1,5 +1,5 @@
 ---
-title: "How to Get a HipCall API Key and Make Your First Request"
+title: "How to Get a Hipcall API Key and Make Your First Request"
 description: "Create an API key in the dashboard, make your first authenticated request, and understand what comes back."
 slug: how-to-get-a-hipcall-api-key
 lang: en

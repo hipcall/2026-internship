@@ -15,7 +15,7 @@
 
 **3. Kayıt Sonrası Görünürlük**
 * Anahtar oluşturulduktan sonra ekranda anahtar kodu, "Tamam" butonu ve şu uyarı metni yer alır:
-  > "Lütfen bu gizli anahtarı güvenli ve erişilebilir bir yere saklayın. Güvenlik nedeniyle bunu HipCall hesabınız üzerinden tekrar görüntüleyemeyeceksiniz. Bu gizli anahtarı kaybederseniz yeni bir tane oluşturmanız gerekecektir."
+  > "Lütfen bu gizli anahtarı güvenli ve erişilebilir bir yere saklayın. Güvenlik nedeniyle bunu Hipcall hesabınız üzerinden tekrar görüntüleyemeyeceksiniz. Bu gizli anahtarı kaybederseniz yeni bir tane oluşturmanız gerekecektir."
 * İlgili sayfa kapatıldıktan sonra API anahtarının tam hâli bir daha görüntülenemez. Liste ekranında anahtarın tam metni yerine maskelenmiş bir versiyonu yer alır.
 
 **4. Anahtar Silme İşlemi**
@@ -49,21 +49,7 @@ curl -sS -i https://use.hipcall.com/api/v3/profile
 ```
 **Çıktı:**
 ```text
-HTTP/1.1 401 Unauthorized
-Alt-Svc: h3=":443"; ma=2592000
-Cache-Control: max-age=0, private, must-revalidate
-Content-Length: 96
-Content-Type: application/json; charset=utf-8
-Date: Wed, 16 Sep 2026 09:38:50 GMT
-Server: Caddy
-Server: Cowboy
-Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
-X-Content-Type-Options: nosniff
-X-Frame-Options: SAMEORIGIN
-X-Request-Id: GNXDov6PAKEhxZUAAKKC
-X-Xss-Protection: 1; mode=block
-
-{"errors":{"detail":"Authentication required. Provide either OAuth Bearer token or API token."}}
+401 Unauthorized (Bölge/sunucu farklılığı).
 ```
 
 **Doğru Adres:** Türkiye lokasyonlu DEMO hesapları için uç nokta adresi `https://use.hipcall.com.tr/api/v3/profile` olarak tespit edilmiştir.
@@ -127,8 +113,8 @@ Başarılı isteğin başlıklarında (Headers) limit bilgileri dönmektedir:
 ```mermaid
 sequenceDiagram
     participant D as Developer
-    participant P as HipCall Panel
-    participant A as HipCall API (use.hipcall.com.tr)
+    participant P as Hipcall Panel
+    participant A as Hipcall API (use.hipcall.com.tr)
     
     D->>P: Ayarlar > Geliştirici > API menüsüne gir
     D->>P: Yeni anahtar oluştur
