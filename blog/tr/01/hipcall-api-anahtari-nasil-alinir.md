@@ -204,3 +204,5 @@ Profil endpoint'i bir istek gövdesi gerektirmez. Kimlik doğrulama `Authorizati
 Diğer endpoint'leri incelemek için [HipCall API Referansı](https://use.hipcall.com/api-docs/) sayfasını ziyaret edin.
 
 Sorular sormak veya entegrasyon deneyiminizi paylaşmak için [HipCall Community](https://community.hipcall.com/) sayfasına gidin.
+
+Canlı API anahtarınızı doğrudan interaktif [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasında da kullanabilirsiniz. Uç noktaları tarayıcınız üzerinden canlı olarak test etmek için "Authorize" butonuna tıklayıp anahtarınızı yapıştırmanız yeterlidir.

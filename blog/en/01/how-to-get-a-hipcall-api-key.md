@@ -203,3 +203,5 @@ The profile endpoint does not require a request body. Authentication is provided
 Explore the [HipCall API Reference](https://use.hipcall.com/api-docs/) to learn about the available endpoints.
 
 Ask questions or share your integration experience in the [HipCall Community](https://community.hipcall.com/).
+
+You can also use your live API token directly on the interactive [Hipcall API Reference](https://use.hipcall.com.tr/api-docs/) page. Click the "Authorize" button to test endpoints interactively in your browser.
