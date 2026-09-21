@@ -151,23 +151,25 @@ Building an enterprise-grade call archive on top of webhooks requires addressing
 
 ```mermaid
 flowchart TD
-    A[Incoming Webhook] --> B{Validate Secret Path}
-    B -- Invalid --> C[401 Unauthorized]
-    B -- Valid --> D[Parse Event & Check UUID]
-    D --> E[Acknowledge HTTP 200 OK immediately < 50ms]
+    A["Incoming Webhook"] --> B{"Validate Secret Path"}
+    B -- "Invalid" --> C["401 Unauthorized"]
+    B -- "Valid" --> D["Parse Event and Check UUID"]
+    D --> E["Acknowledge HTTP 200 OK (< 50ms)"]
 
-    subgraph Background Asynchronous Processing
-        D -. Task.Run .-> F[Upsert Call Record in calls.json]
-        F --> G{record_url exists?}
-        G -- Yes --> H[Download MP3 to recordings/ folder]
-        G -- No --> I[Complete]
+    subgraph BG ["Background Asynchronous Processing"]
+        F["Upsert Call Record in calls.json"]
+        F --> G{"record_url exists?"}
+        G -- "Yes" --> H["Download MP3 to recordings/ folder"]
+        G -- "No" --> I["Complete"]
         H --> I
     end
 
-    subgraph Nightly Reconciliation Job
-        J[Scheduled Cron at 02:00 UTC] --> K[Query Hipcall API: GET /api/v3/calls]
-        K --> L[Compute UUID Set Difference]
-        L --> M[Backfill Missing Calls & Recordings]
+    D -.->|Async Task| F
+
+    subgraph REC ["Nightly Reconciliation Job"]
+        J["Scheduled Cron at 02:00 UTC"] --> K["Query Hipcall API: GET /api/v3/calls"]
+        K --> L["Compute UUID Set Difference"]
+        L --> M["Backfill Missing Calls and Recordings"]
     end
 ```
 
@@ -194,7 +196,7 @@ Network retries or multi-event updates can deliver the same call session more th
 A webhook receiver running alone will suffer minor data loss over time due to application restarts, deployment rollouts, and network blips.
 
 To guarantee a complete archive:
-- Deploy a scheduled job (cron job or background service) that runs every night.
+- Deploy a scheduled job (Windows Task Scheduler, cron, or a background worker) that runs every night.
 - Query the Hipcall REST API: `GET /api/v3/calls?started_at[gte]=...`.
 - Calculate the set difference between the API's UUID list and your local database.
 - Fetch and insert any missing call records and audio files.
@@ -463,4 +465,4 @@ The following fields are delivered inside the `data` object for call events:
 
 - Set up a durable message broker (such as RabbitMQ or AWS SQS) between the HTTP receiver and database workers to handle burst call volumes.
 - Migrate from `calls.json` to PostgreSQL or SQL Server with a `UNIQUE` constraint on the `uuid` column.
-- Implement the nightly reconciliation cron job using Hipcall's `GET /api/v3/calls` REST API to guarantee zero data loss.
+- Implement the nightly reconciliation service using Hipcall's `GET /api/v3/calls` REST API and schedule it via Windows Task Scheduler or cron to guarantee zero data loss.

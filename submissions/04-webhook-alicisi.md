@@ -282,26 +282,28 @@ Hipcall paketlere imza (`X-Signature`) atmadığı için dışarıdan kötü niy
 
 ```mermaid
 flowchart TD
-    A[Gelen Webhook İsteği] --> B{Gizli URL Token Doğrulaması}
-    B -- Geçersiz --> C[401 Unauthorized / Reddet]
-    B -- Geçerli --> D[Gövdeyi Kuyruğa Bırak: Channel / Redis]
-    D --> E[Anında HTTP 200 OK Dön < 50ms]
+    A["Gelen Webhook İsteği"] --> B{"Gizli URL Token Doğrulaması"}
+    B -- "Geçersiz" --> C["401 Unauthorized / Reddet"]
+    B -- "Geçerli" --> D["Gövdeyi Kuyruğa Bırak: Channel / Redis"]
+    D --> E["Anında HTTP 200 OK Dön (50 ms altı)"]
 
-    subgraph Arka Plan İşleme (Background Worker)
-        D -. Asenkron Tüketim .-> F{Idempotency: data.uuid Var mı?}
-        F -- Mevcut Kayıt --> G[Mevcut CDR Kaydını Güncelle]
-        F -- Yeni Kayıt --> H[Veritabanına Yeni CDR Ekle]
-        H --> I{record_url Mevcut mu?}
-        I -- Evet --> J[Geçici S3 URL'den Sesi İndir ve Arşivle]
-        I -- Hayır --> K[İşlem Tamamlandı]
+    subgraph BG ["Arka Plan İşleme (Background Worker)"]
+        F{"Idempotency: data.uuid Var mı?"}
+        F -- "Mevcut Kayıt" --> G["Mevcut CDR Kaydını Güncelle"]
+        F -- "Yeni Kayıt" --> H["Veritabanına Yeni CDR Ekle"]
+        H --> I{"record_url Mevcut mu?"}
+        I -- "Evet" --> J["Geçici S3 URL'den Sesi İndir ve Arşivle"]
+        I -- "Hayır" --> K["İşlem Tamamlandı"]
         J --> K
     end
 
-    subgraph Gece Mutabakatı (Reconciliation Cron)
-        L[Gece 02:00 Zamanlanmış Görev] --> M[Hipcall REST API: GET /api/v3/calls]
-        M --> N[Günün Tüm UUID'lerini Çek]
-        N --> O[Yerel Veritabanı ile Kıyasla]
-        O --> P[Kaçan Çağrıları İndirip Arşive Eşitle]
+    D -.->|Asenkron Tüketim| F
+
+    subgraph REC ["Gece Mutabakatı (Reconciliation Cron)"]
+        L["Gece 02:00 Zamanlanmış Görev"] --> M["Hipcall REST API: GET /api/v3/calls"]
+        M --> N["Günün Tüm UUID'lerini Çek"]
+        N --> O["Yerel Veritabanı ile Kıyasla"]
+        O --> P["Kaçan Çağrıları İndirip Arşive Eşitle"]
     end
 ```
 

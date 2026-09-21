@@ -151,23 +151,25 @@ Webhook mimarisinde eksiksiz bir arşiv oluşturmak teslimat garantilerini ve u�
 
 ```mermaid
 flowchart TD
-    A[Gelen Webhook İsteği] --> B{Gizli URL Şifresini Doğrula}
-    B -- Geçersiz --> C[401 Unauthorized]
-    B -- Geçerli --> D[Gövdeyi Ayrıştır & UUID Kontrolü Yap]
-    D --> E[Anında HTTP 200 OK Dön < 50ms]
+    A["Gelen Webhook İsteği"] --> B{"Gizli URL Şifresini Doğrula"}
+    B -- "Geçersiz" --> C["401 Unauthorized"]
+    B -- "Geçerli" --> D["Gövdeyi Ayrıştır ve UUID Kontrolü Yap"]
+    D --> E["Anında HTTP 200 OK Dön (50 ms altı)"]
 
-    subgraph Arka Plan Asenkron İşleme
-        D -. Task.Run .-> F[calls.json Dosyasına Tekil Kayıt Yaz]
-        F --> G{record_url Var mı?}
-        G -- Evet --> H[MP3 Dosyasını recordings Klasörüne İndir]
-        G -- Hayır --> I[Tamamlandı]
+    subgraph BG ["Arka Plan Asenkron İşleme"]
+        F["calls.json Dosyasına Tekil Kayıt Yaz"]
+        F --> G{"record_url Var mı?"}
+        G -- "Evet" --> H["MP3 Dosyasını recordings Klasörüne İndir"]
+        G -- "Hayır" --> I["Tamamlandı"]
         H --> I
     end
 
-    subgraph Gece Mutabakat Görevi
-        J[Zamanlanmış Görev: Gece 02:00] --> K[Hipcall REST API: GET /api/v3/calls]
-        K --> L[UUID Küme Farkını Hesapla]
-        L --> M[Kaçan Çağrıları ve Sesleri Arşive Ekle]
+    D -.->|Asenkron Görev| F
+
+    subgraph REC ["Gece Mutabakat Görevi"]
+        J["Zamanlanmış Görev: Gece 02:00"] --> K["Hipcall REST API: GET /api/v3/calls"]
+        K --> L["UUID Küme Farkını Hesapla"]
+        L --> M["Kaçan Çağrıları ve Sesleri Arşive Ekle"]
     end
 ```
 
@@ -194,7 +196,7 @@ Ağ dalgalanmaları nedeniyle aynı olayın iki kez ulaşması veya mutabakat se
 Yalnızca webhook dinleyen bir alıcı, sunucu yeniden başlatmaları veya ağ kesintileri nedeniyle zaman içinde fire verir.
 
 Eksiksiz arşiv sağlamak için:
-- Her gece çalışan zamanlanmış bir arka plan görevi (cron job) kurun.
+- Her gece çalışan zamanlanmış bir arka plan görevi (Windows Görev Zamanlayıcısı veya cron) kurun.
 - Hipcall REST API'sine istek atın: `GET /api/v3/calls?started_at[gte]=...`.
 - API'den gelen UUID listesi ile yerel veritabanınızdaki UUID listesinin küme farkını alın.
 - Eksik kalan çağrıları ve ses kayıtlarını API üzerinden çekerek arşive dahil edin.
@@ -463,4 +465,4 @@ Alıcınız arka arkaya iki veya üç kez 500 hatası döndüğünde ya da zaman
 
 - Ani çağrı yoğunluklarında HTTP alıcısı ile veritabanı arasına RabbitMQ veya Redis Streams gibi bir mesaj kuyruğu yerleştirin.
 - Dosya tabanlı `calls.json` yapısından PostgreSQL veya SQL Server veritabanına geçin ve `uuid` kolonuna `UNIQUE` indeks ekleyin.
-- Hipcall'ın `GET /api/v3/calls` REST API'sini kullanan gece mutabakat servisini cron görevine bağlayarak sıfır veri kaybını garanti altına alın.
+- Hipcall'ın `GET /api/v3/calls` REST API'sini kullanan gece mutabakat servisini Windows Görev Zamanlayıcısı'na (Task Scheduler) bağlayarak sıfır veri kaybını garanti altına alın.
