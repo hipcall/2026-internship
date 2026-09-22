@@ -1,0 +1,29 @@
+[
+  {
+    "phone": "+90551XXXXXXX",
+    "name": "Ahmet Yılmaz",
+    "company": "Tech Yazılım A.Ş.",
+    "segment": "VIP Müşteri",
+    "balance": "0.00 TL (Düzenli)",
+    "crm_url": "https://crm.example.com/customers/101",
+    "account_owner_id": 4200
+  },
+  {
+    "phone": "+90530XXXXXXX",
+    "name": "Mehmet Demir",
+    "company": "Demir Lojistik Ltd.",
+    "segment": "Kurumsal",
+    "balance": "14.250 TL (Açık Fatura)",
+    "crm_url": "https://crm.example.com/customers/102",
+    "account_owner_id": 4200
+  },
+  {
+    "phone": "+90552XXXXXXX",
+    "name": "Ayşe Kaya",
+    "company": "Kaya Ticaret Ltd.",
+    "segment": "Özel Müşteri",
+    "balance": "3.500 TL (Güncel)",
+    "crm_url": "https://crm.example.com/customers/103",
+    "account_owner_id": 4200
+  }
+]
