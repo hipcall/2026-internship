@@ -97,7 +97,8 @@ X-Forwarded-Proto: https
 ```
 * **İmza Başlığı:** **YOK.** (`X-Signature`, `X-Hub-Signature` veya benzeri bir HMAC imza başlığı iletilmemektedir).
 * **Kullanılan HTTP İstemcisi:** Hipcall arka planda Elixir tabanlı `mint/1.9.0` istemcisini kullanmaktadır.
-* **Sonuç:** İmza başlığı olmadığı için alıcı uç noktasının güvenliği paylaşılan gizli anahtar (Shared Secret URL Path/Token) veya IP beyaz listesi (IP Whitelisting) ile sağlanmalıdır.
+* **Topluluk & Yol Haritası Bilgisi:** Hipcall mühendislerinin toplulukta belirttiği üzere mevcut altyapı **Hipcall Webkancaları v1** sürümüdür. İlerleyen dönemde [Standard Webhooks](https://www.standardwebhooks.com/) standardına uygun v2 sürümü geliştirilecek ve imza doğrulaması standartlaştırılacaktır.
+* **Sonuç:** Mevcut v1 sürümünde imza başlığı olmadığı için alıcı uç noktasının güvenliği paylaşılan gizli anahtar (Shared Secret URL Path/Token) veya IP beyaz listesi (IP Whitelisting) ile sağlanmalıdır.
 
 ---
 
@@ -203,27 +204,30 @@ X-Forwarded-Proto: https
 
 ## Bölüm D — Teslimat Garantisi: Asıl Konu
 
-Bu bölümdeki tüm ölçümler Minimal API alıcısı üzerinde bilerek hata ve gecikmeler oluşturularak canlı test edilmiş ve kaydedilmiştir.
+Bu bölümdeki ölçümler Minimal API alıcısı üzerinde bilerek hata ve gecikmeler oluşturularak canlı test edilmiş, ardından Hipcall Community forumunda mühendisler tarafından resmi kurallarıyla doğrulanmıştır.
 
-### D1. 500 Hata Testi
+### D1. 500 Hata Testi ve Tek Gönderimlilik (At-Most-Once)
 * Alıcıdan `500 Internal Server Error` dönüldüğünde santral telefon görüşmesini **asla kesmez**; telefon normal çalar ve görüşme sürdürülür (telefoni bacağı ile webhook dağıtıcısı birbirinden tamamen yalıtılmıştır).
-* **Tekrar Deneme (Retry):** **Hipcall isteği TEKRAR DENEMEZ.** İstek başarısız olduğunda sistem olayı yeniden göndermez (At-Most-Once delivery).
+* **Tekrar Deneme (Retry):** **Hipcall isteği TEKRAR DENEMEZ.** Webhook gönderimleri tek gönderimliliktir (at-most-once). Uç noktanız 500 (veya 200 dışında herhangi bir HTTP durum kodu) dönerse istek tekrarlanmaz.
 * **Panel Logs Sekmesi:** İlgili olayın karşısında kırmızı renkli **`500`** durum kodu, yanıt süresi ve istek zamanı listelenir. Olay için hiçbir tekrar deneme kaydı oluşmaz.
 
-### D2. Zaman Aşımı (Timeout) Testi
-Alıcıya yapay gecikmeler (`Task.Delay`) eklenerek yapılan canlı süre testleri:
-* **5 saniye gecikmede:** Olaylar başarıyla tamamlanır ve panelde `200` olarak loglanır.
-* **10 saniye gecikmede:** Sınır aşılır; `call_hangup` olayı loglara dahi düşmeden kesilir.
-* **15 ve 30 saniye gecikmede:** Hipcall bağlantıyı zaman aşımıyla tamamen kapatır; panelde bu aramalara ait hiçbir log kaydı oluşmaz.
-* **Sonuç:** Hipcall webhook istemcisinin HTTP zaman aşımı süresi kesin olarak **5 ila 10 saniye arasındadır**. Alıcının cevabı 5 saniyeyi geçerse olay düşürülür.
+### D2. Zaman Aşımı (Timeout) Süresi: 15 Saniye
+Alıcıya yapay gecikmeler (`Task.Delay`) eklenerek yapılan canlı süre testleri ve resmi Hipcall altyapı kuralı:
+* **Resmi Zaman Aşımı Süresi:** Hipcall webhook istemcisi yanıtı **tam 15 saniye** içinde bekler; bu sürede yanıt gelmezse istek zaman aşımına uğrar ve düşer.
+* **Canlı Test Ölçümleri:**
+  * **5 saniye gecikmede:** Olaylar başarıyla tamamlanır ve panelde `200` olarak loglanır.
+  * **10 saniye gecikmede:** Ağ dalgalanmalarıyla sınıra yaklaşılır.
+  * **15 ve 30 saniye gecikmede:** Hipcall bağlantıyı zaman aşımıyla kapatır; alıcı yanıt vermediği için istek düşer.
+* **Tasarım Çıkarımı:** Alıcı işini 15 saniyeye bırakmamalı, HTTP isteğini bloklamadan $< 50\text{ ms}$ içinde `200 OK` dönmelidir.
 
-### D3. Ardışık Hatalar ve Entegrasyon Durumu
-* Yapılan canlı test ölçümünde: Alıcıdan **arka arkaya 2-3. kez 500 hatası** alındığı anda Hipcall, santral kaynaklarını korumak amacıyla webhook entegrasyon durumunu derhal kırmızı rozetle **"Kırık"** (Broken / Failing) durumuna almaktadır.
-* Durum "Kırık" olduğunda santral artık yeni webhook istekleri göndermeyi tamamen durdurur.
+### D3. Ardışık Hatalar ve Entegrasyon Durumu (1 Saatte 4 Başarısız Yanıt Kuralı)
+Hipcall santral kaynaklarını korumak için otomatik bir koruma (Circuit Breaker) kuralı işletir:
+* **Kırık Durumuna Geçiş:** Eğer alıcınızdan **1 saat içinde 4 başarısız yanıt** (500 veya 200 dışı herhangi bir hata kodu ya da 15 saniyelik zaman aşımı) alınırsa, entegrasyon otomatik olarak **"Kırık"** (Broken / Failing) durumuna geçer.
+* **Kırık Durumunun Etkisi:** Entegrasyon "Kırık" rozeti aldığında, siz onu elle "Aktif" duruma getirene kadar Hipcall santrali **hiçbir olayı (event) göndermez**. Bu süreçte gerçekleşen tüm çağrıların webhook bildirimleri kaçar.
 
 ### D4. Durumu Eski Hâline Döndürme
-* Entegrasyon ekranında sağ üstteki **"Düzenle"** butonuna tıklanır.
-* Durum seçeneği tekrar **"Aktif"** konuma getirilip **"Kaydet"** butonuna basıldığında entegrasyon kırmızı "Kırık" durumundan çıkarak yeşil "Aktif" rozetine döner ve log akışı yeniden başlar.
+* Hipcall web panelinde entegrasyon ekranına girilir ve sağ üstteki **"Düzenle"** butonuna tıklanır.
+* Durum seçeneği tekrar **"Aktif"** konuma getirilip **"Kaydet"** butonuna basıldığında entegrasyon kırmızı "Kırık" durumundan çıkarak yeşil "Aktif" rozetine döner ve event akışı yeniden başlar.
 
 ---
 
@@ -234,12 +238,12 @@ Alıcıya yapay gecikmeler (`Task.Delay`) eklenerek yapılan canlı süre testle
 Bu sorunun çözümü 4 temel mimari kurala dayanır:
 
 ### 1. Hızlı Cevap Ver, İşi Sonraya Bırak
-* **Neden?:** Canlı testlerimizde gördüğümüz gibi Hipcall 5 ila 10 saniye içinde yanıt alamazsa isteği zaman aşımına uğratıp kapatır ve bir daha asla tekrar denemez (At-Most-Once). Eğer alıcı HTTP isteğini tutarken ses kaydı indirmeye veya veritabanı kilitleriyle uğraşmaya kalkarsa istek zaman aşımına düşer ve o çağrı sonsuza dek kaybolur.
+* **Neden?:** Hipcall en fazla 15 saniye bekler ve 200 dışı kodlarda ya da zaman aşımlarında isteği tekrar denemez (1 saatte 4 başarısız yanıtta ise entegrasyonu tamamen "Kırık" durumuna alır). Eğer alıcı HTTP isteğini tutarken ses kaydı indirmeye veya veritabanı kilitleriyle uğraşmaya kalkarsa istek zaman aşımına düşer ve o çağrı sonsuza dek kaybolur.
 * **İşlem Sırası:**
   1. HTTP POST isteği karşılanır.
   2. Gizli anahtar (token) kontrolü yapılır ($\sim 1\text{ ms}$).
   3. Gelen JSON gövdesi hızlıca belleğe veya bir iş kuyruğuna alınır.
-  4. **Hipcall'a anında `200 OK` dönülür** ($< 50\text{ ms}$). Böylece santral bacağı başarıyla tamamlanır.
+  4. **Hipcall'a anında `200 OK` dönülür** ($< 50\text{ ms}$). Böylece santral bacağı başarıyla tamamlanır ve kırık riski sıfırlanır.
   5. Ses dosyasını indirmek ve dosyaya yazmak gibi vakit alan işler arka planda asenkron olarak (`Task.Run` / Background Worker) tamamlanır.
 
 ### 2. Idempotency (Tekilleştirme)
@@ -249,7 +253,15 @@ Ağ kopup tekrar bağlandığında aynı olayın çift gelmesi veya mutabakat se
 
 ### 3. Mutabakat (Reconciliation — Kaçan Çağrıları Yakalama)
 * **Neden Gerekli?:** Webhook "At-Most-Once" çalıştığı için sunucumuz bakımdayken, yeni sürüm deploy edilirken veya internet koptuğunda santralin fırlattığı webhook'lar bize ulaşamaz.
-* **Nasıl Çözülür?:** Bu eksikliği kapatmak için arka planda periyodik olarak (örneğin her gece saat 02:00'de) çalışan bir mutabakat servisi (zamanlanmış görev / cron job) kurarız. Bu servis **Ödev 2'de hazırladığımız `GET /api/v3/calls` REST API'sine** bağlanarak günün tüm çağrılarını çeker. Kendi veritabanımızdaki UUID listesi ile API'den gelen listeyi kıyaslar; arada kaçan eksik çağrılar varsa onları API'den indirip arşivimize ekler.
+* **Nasıl Çözülür?:** Bu eksikliği kapatmak için arka planda periyodik olarak (örneğin her gece saat 02:00'de) çalışan bir mutabakat servisi (zamanlanmış görev / cron job / Windows Task Scheduler) kurulur.
+* **Hipcall REST API Sorgusu:** Hipcall mühendislerinin tavsiye ettiği tam sorgu formatı şudur:
+  ```http
+  GET /api/v3/calls?started_at[gte]=2026-09-21T00:00:00Z&started_at[lte]=2026-09-21T23:59:59Z&sort=started_at.asc&limit=100
+  ```
+* **Önemli API Kuralları:**
+  * Bu API **yalnızca sonlanmış çağrıları** döner (henüz süren çağrılar listede yer almaz).
+  * API geriye dönük olarak **en fazla son 12 ayı** döner.
+  * Alıcı, kesinti aralığındaki çağrıları çekip yerel veritabanındaki kayıtlarla `uuid` üzerinden kıyaslar ve eksik olanları içeriye `upsert` eder. Böylece veri kaybı kesin olarak sıfırlanır.
 
 ### 4. İmza Yoksa Sahte İstekleri Engelleme (2 Yöntem)
 Hipcall paketlere imza (`X-Signature`) atmadığı için dışarıdan kötü niyetli birinin sahte çağrı bildirimi göndermesini engellemek üzere iki koruma yöntemi uygulanır:
@@ -317,23 +329,35 @@ flowchart TD
 **Hayır, tutmaz.** Yalnızca webhook alıcısına güvenilen bir sistemde 1 hafta sonunda yerel veritabanındaki çağrı sayısı, Hipcall santralindeki gerçek çağrı sayısından **daha az** olacaktır (fire verilecektir).
 
 ### 2. Fark Nereden Gelir?
-* **Tekrar Deneme Yokluğu (At-Most-Once):** Hipcall başarısız istekleri tekrar denemez.
+* **Tekrar Deneme Yokluğu (At-Most-Once):** Hipcall gönderimleri tek seferliktir; alıcı 500 veya 200 dışı kod döndüğünde ya da erişilemediğinde istek tekrarlanmaz.
 * **Yeniden Başlatma ve Deployment Kesintileri:** Alıcı uygulamanın güncellendiği, sunucunun yeniden başladığı veya ağın dalgalandığı o birkaç saniye içinde gerçekleşen çağrıların webhook'ları bağlantı hatasıyla düşer.
-* **Durumun "Kırık" Moduna Geçmesi:** Kısa süreli bir kesintide birkaç çağrı üst üste hata alırsa Hipcall webhook durumunu "Kırık" yapar. Yönetici durumu fark edip "Düzenle" diyene kadar geçen saatlerde gerçekleşen hiçbir çağrı için webhook fırlatılmaz.
-* **5-10 Saniyelik Zaman Aşımı:** Anlık yük altında alıcı 5 saniyeden geç yanıt verirse santral isteği düşürür.
+* **1 Saatte 4 Hatada "Kırık" Moduna Geçiş:** Eğer alıcı 1 saat içinde 4 kez başarısız yanıt (500 veya zaman aşımı) verirse, Hipcall entegrasyonu otomatik olarak **"Kırık"** durumuna alır. Yönetici durumu fark edip "Düzenle > Aktif > Kaydet" yapana kadar geçen saatlerde gerçekleşen hiçbir çağrı için webhook gönderilmez.
+* **15 Saniyelik Zaman Aşımı:** Anlık sunucu yükü veya veritabanı kilitlenmesi nedeniyle alıcı 15 saniye içinde yanıt veremezse santral isteği düşürür.
 
 ### 3. Bu Fark Nasıl Kapatılır?
 Farkı kapatmanın tek kesin yolu **Webhook + REST API Mutabakatı (Reconciliation)** modelidir:
 * Webhook alıcısı anlık canlı akışı sağlar (%99 başarı).
-* Kalan %1'lik kayıp için her gece çalışan bir mutabakat servisi Ödev 2'deki `GET /api/v3/calls` API'sini sorgular.
-* Günlük `uuid` küme farkı (Set Difference) alınarak kaçan kayıtlar REST API üzerinden çekilir ve yerel veritabanına eklenir. Böylece 1 hafta sonunda kayıtlar Hipcall ile kuruşu kuruşuna eşitlenir.
+* Kalan %1'lik kayıp için her gece çalışan bir mutabakat servisi (Windows Görev Zamanlayıcısı veya cron) kesinti aralığını çeker:
+  ```http
+  GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&sort=started_at.asc&limit=100
+  ```
+* Hipcall API'si yalnızca sonlanmış çağrıları ve son 12 ayı döndüğü için, tamamlanan çağrılar güvenle yerel veritabanındaki `uuid` listesiyle kıyaslanır (Set Difference) ve eksik kayıtlar içeriye `upsert` edilir. Böylece 1 hafta sonunda kayıtlar Hipcall ile kuruşu kuruşuna eşitlenir.
 
 ---
 
-## Community Konusu
+## Community Konusu ve Hipcall Resmi Yanıtı
 
-Hipcall Community forumunda Bölüm D bulgularını ve teslimat mimarisini tartışmak üzere açılan başlık:
-* **Başlık:** [Webhook'larda eksik çağrı verilerini nasıl tamamlayabiliriz?](https://community.hipcall.com/t/webhooklarda-eksik-cagri-verilerini-nasil-tamamlayabiliriz/263?u=fansa)
+Hipcall Community forumunda Bölüm D bulgularını ve teslimat mimarisini tartışmak üzere açtığım başlık ve Hipcall ekibinden gelen resmi yanıt:
+* **Topluluk Başlığı:** [Webhook'larda eksik çağrı verilerini nasıl tamamlayabiliriz?](https://community.hipcall.com/t/webhooklarda-eksik-cagri-verilerini-nasil-tamamlayabiliriz/263?u=fansa)
+* **Hipcall Tarafından Verilen Resmi Bilgiler:**
+  1. **Tek Gönderimlilik:** Webhook gönderimleri tek seferliktir. Uç noktanız 500 (veya 200 dışında herhangi bir kod) dönerse istek tekrarlanmaz.
+  2. **Zaman Aşımı (Timeout):** Yanıt **15 saniye** içinde beklenir; bu sürede yanıt gelmezse istek düşer.
+  3. **Devre Kesici (Circuit Breaker):** **1 saat içinde 4 başarısız yanıt** alınırsa entegrasyon otomatik olarak **"Kırık"** durumuna geçer ve siz tekrar "Aktif"e alana kadar hiçbir event gönderilmez.
+  4. **Performans Önerisi:** Uç noktanın işi kuyruğa alıp hemen 200 dönmesi, ağır işlemleri arka planda yapması önerilir.
+  5. **Kesinti Sonrası Mutabakat:** Kesinti aralığını çekip `uuid` üzerinden tamamlamak için:
+     `GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&sort=started_at.asc&limit=100` kullanılır. API yalnızca sonlanmış çağrıları ve son 12 ayı döner.
+  6. **Resmi Dokümantasyon:** [Webkancaları nelerdir ve nasıl ayarlanır?](https://yardim.hipcall.com/gelistirme-araclari/webkancalari-nelerdir-ve-nasil-ayarlanir/)
+  7. **Standartlar & v2 Yol Haritası:** Mevcut kurallar Hipcall Webkancaları v1 için geçerlidir. İlerleyen dönemde [Standard Webhooks](https://www.standardwebhooks.com/) standardına uygun v2 sürümü geliştirilecektir.
 
 ---
 

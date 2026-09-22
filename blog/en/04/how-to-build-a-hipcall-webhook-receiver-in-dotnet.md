@@ -24,8 +24,8 @@ Webhooks reverse that model. When a call starts, bridges to an agent, or termina
 
 Receiving an HTTP request is straightforward. Building a production-grade webhook receiver requires solving three architectural realities:
 1. Hipcall dispatches webhooks with an at-most-once delivery model without automatic retries.
-2. Incoming webhook requests do not contain cryptographic HMAC signature headers (`X-Signature`).
-3. Telephony dispatchers enforce strict HTTP timeouts (5 to 10 seconds).
+2. Incoming webhook requests do not contain cryptographic HMAC signature headers (`X-Signature`), with a Standard Webhooks v2 implementation planned on the product roadmap.
+3. Telephony dispatchers enforce a strict 15-second HTTP timeout and automatically trip the integration status to "Broken" if four failed responses occur within a single hour.
 
 This guide walks through configuring a webhook in the Hipcall dashboard, building an ASP.NET Core Minimal API receiver that responds within 50 milliseconds, processing call audio asynchronously, deduplicating incoming records by UUID, and pairing real-time ingestion with scheduled reconciliation to guarantee zero data loss.
 
@@ -175,7 +175,7 @@ flowchart TD
 
 ### 1. Respond quickly, defer heavy work
 
-Hipcall enforces a strict HTTP timeout between 5 and 10 seconds. If your receiver blocks to download audio or write to a slow database table, the connection drops. Because Hipcall does not retry failed dispatches, that event is lost permanently.
+Hipcall expects a response within 15 seconds. If your receiver blocks the HTTP connection to download call audio or wait for database locks, the request times out. Furthermore, if four failed responses (or timeouts) occur within a one-hour window, Hipcall trips the integration into "Broken" status and completely stops dispatching events until manually reset.
 
 Follow this execution pipeline:
 1. Validate authentication token ($\sim 1\text{ ms}$).
@@ -197,9 +197,12 @@ A webhook receiver running alone will suffer minor data loss over time due to ap
 
 To guarantee a complete archive:
 - Deploy a scheduled job (Windows Task Scheduler, cron, or a background worker) that runs every night.
-- Query the Hipcall REST API: `GET /api/v3/calls?started_at[gte]=...`.
-- Calculate the set difference between the API's UUID list and your local database.
-- Fetch and insert any missing call records and audio files.
+- Query the Hipcall REST API for the desired time interval:
+  ```http
+  GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&sort=started_at.asc&limit=100
+  ```
+- Note that the API returns only completed calls and retains the last 12 months.
+- Calculate the set difference between the API's UUID list and your local database, then backfill any missing call records and audio files.
 
 ### 4. Securing unsigned endpoints
 
@@ -435,13 +438,15 @@ If your server encounters an internal error and returns `500 Internal Server Err
 - **Hipcall does not retry the request.** The event is permanently dropped.
 
 ### 2. Timeouts
-If your receiver takes longer than 5 to 10 seconds to respond, Hipcall terminates the TCP connection and drops the event without recording a successful delivery.
+If your receiver takes longer than 15 seconds to respond, Hipcall terminates the TCP connection and drops the event without recording a successful delivery.
 
-### 3. Consecutive failures and the "Broken" status
-When your receiver returns two to three consecutive 500 errors or connection timeouts:
-- Hipcall protects PBX resources by changing the integration status to **Broken ("Kırık")** with a red badge.
-- When marked as Broken, Hipcall halts all further webhook dispatches.
+### 3. Failure limits and the "Broken" status
+When your receiver returns four failed responses (any status code other than 200 or 15-second timeouts) within a rolling one-hour window:
+- Hipcall protects PBX resources by automatically setting the integration status to **Broken ("Kırık")** with a red badge.
+- When marked as Broken, Hipcall halts all subsequent webhook dispatches until manually reactivated.
 - **How to recover:** Open the integration in the dashboard, click **Edit ("Düzenle")**, toggle the status switch back to **Active ("Aktif")**, and click **Save ("Kaydet")**.
+
+For further configuration details, consult the official guide on [What are webhooks and how to set them up?](https://yardim.hipcall.com/gelistirme-araclari/webkancalari-nelerdir-ve-nasil-ayarlanir/). The specifications in this guide cover Hipcall Webhooks v1; an upcoming v2 specification aligned with [Standard Webhooks](https://www.standardwebhooks.com/) is currently under development.
 
 ## Parameter reference
 

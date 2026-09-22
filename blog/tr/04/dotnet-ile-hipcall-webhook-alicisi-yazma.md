@@ -23,9 +23,9 @@ status: review
 Webhook mimarisi bu süreci tersine çevirir. Bir çağrı başladığında, temsilciye bağlandığında veya kapandığında Hipcall santrali doğrudan sunucunuza bir HTTP POST isteği gönderir.
 
 Gelen bir HTTP isteğini karşılamak işin başlangıcıdır. Üretim ortamında çalışan güvenilir bir webhook alıcısı kurmak üç teknik gerçeği yönetmeyi gerektirir:
-1. Hipcall webhook istekleri otomatik tekrar deneme mekanizması bulunmayan en fazla bir kez (at-most-once) iletim modeliyle çalışır.
-2. Gelen isteklerde HMAC imza başlığı (`X-Signature`) bulunmaz.
-3. Santral dağıtıcısı 5 ila 10 saniye arasında katı bir HTTP zaman aşımı uygular.
+1. Hipcall webhook istekleri otomatik tekrar deneme mekanizması bulunmayan tek gönderimli (at-most-once) iletim modeliyle çalışır.
+2. Gelen isteklerde HMAC imza başlığı (`X-Signature`) bulunmaz (Standard Webhooks v2 standardı geliştirme aşamasındadır).
+3. Santral dağıtıcısı 15 saniyelik katı bir HTTP zaman aşımı uygular ve 1 saat içinde 4 başarısız yanıt alındığında entegrasyonu otomatik olarak "Kırık" durumuna alır.
 
 Bu rehberde Hipcall panelinde webhook yapılandırmayı, 50 milisaniye altında yanıt veren bir ASP.NET Core Minimal API alıcısı kurmayı, ses kayıtlarını arka planda asenkron indirmeyi, çağrıları UUID ile tekilleştirmeyi ve sıfır veri kaybı için canlı akışı gece mutabakatıyla desteklemeyi ele alıyoruz.
 
@@ -175,7 +175,7 @@ flowchart TD
 
 ### 1. Hızlı cevap verin, ağır işleri sonraya bırakın
 
-Hipcall alıcıdan 5 ila 10 saniye içinde yanıt bekler. Alıcı HTTP isteğini bekletip ses kaydı indirmeye veya ağır veritabanı kilitlerine girdiğinde bağlantı zaman aşımına uğrar. Hipcall başarısız istekleri tekrar denemediği için o çağrı kaydı tamamen kaybolur.
+Hipcall alıcıdan yanıtı en fazla 15 saniye içinde bekler. Alıcı HTTP isteğini bekletip ses kaydı indirmeye veya veritabanı kilitlerine girdiğinde bağlantı zaman aşımına uğrar. Üstelik 1 saat içinde 4 kez başarısız yanıt (veya zaman aşımı) oluşursa santral entegrasyonu otomatik olarak "Kırık" durumuna alır ve siz elle müdahale edene kadar tüm webhook akışını durdurur.
 
 İşlem sırası şu şekilde olmalıdır:
 1. Gizli anahtar doğrulamasını gerçekleştirin ($\sim 1\text{ ms}$).
@@ -197,9 +197,12 @@ Yalnızca webhook dinleyen bir alıcı, sunucu yeniden başlatmaları veya ağ k
 
 Eksiksiz arşiv sağlamak için:
 - Her gece çalışan zamanlanmış bir arka plan görevi (Windows Görev Zamanlayıcısı veya cron) kurun.
-- Hipcall REST API'sine istek atın: `GET /api/v3/calls?started_at[gte]=...`.
-- API'den gelen UUID listesi ile yerel veritabanınızdaki UUID listesinin küme farkını alın.
-- Eksik kalan çağrıları ve ses kayıtlarını API üzerinden çekerek arşive dahil edin.
+- Kesinti aralığını çekmek için Hipcall REST API'sine istek atın:
+  ```http
+  GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&sort=started_at.asc&limit=100
+  ```
+- Bu API yalnızca sonlanmış çağrıları ve son 12 ayı döner. API'den gelen UUID listesi ile yerel veritabanınızdaki UUID listesinin küme farkını alın.
+- Eksik kalan çağrıları ve ses kayıtlarını API üzerinden çekip `uuid` üzerinden upsert ederek arşivi kuruşu kuruşuna eşitleyin.
 
 ### 4. İmzasız uç noktaları koruma
 
@@ -435,13 +438,15 @@ Sunucunuz iç hata verip `500 Internal Server Error` döndüğünde:
 - **Hipcall isteği tekrar denemez.** Olay kalıcı olarak düşer.
 
 ### 2. Zaman aşımı durumunda
-Alıcınızın yanıt süresi 5 ila 10 saniyeyi aştığında Hipcall TCP bağlantısını sonlandırır ve olayı başarısız kabul ederek düşürür.
+Alıcınızın yanıt süresi 15 saniyeyi aştığında Hipcall TCP bağlantısını sonlandırır ve olayı başarısız kabul ederek düşürür.
 
-### 3. Ardışık hatalar ve "Kırık" durumu
-Alıcınız arka arkaya iki veya üç kez 500 hatası döndüğünde ya da zaman aşımına uğradığında:
-- Hipcall santral kaynaklarını korumak amacıyla entegrasyon durumunu kırmızı rozetle **Kırık** durumuna getirir.
-- Durum Kırık olduğunda santral sonraki webhook isteklerini göndermeyi tamamen durdurur.
+### 3. Başarısız yanıtlar ve "Kırık" durumu
+Alıcınız 1 saat içinde 4 kez 200 dışı başarısız yanıt döndüğünde ya da 15 saniyelik zaman aşımına uğradığında:
+- Hipcall santral kaynaklarını korumak amacıyla entegrasyon durumunu otomatik olarak kırmızı rozetle **Kırık** durumuna getirir.
+- Durum Kırık olduğunda, siz onu panelden tekrar Aktif konuma getirene kadar santral yeni webhook istekleri göndermez.
 - **Eski hâline döndürme:** Panelde entegrasyonu açın, **Düzenle** butonuna tıklayın, durum anahtarını tekrar **Aktif** yapıp **Kaydet** butonuna basın.
+
+Ayrıntılı yapılandırma ve güncel rehberler için Hipcall'ın resmi [Webkancaları nelerdir ve nasıl ayarlanır?](https://yardim.hipcall.com/gelistirme-araclari/webkancalari-nelerdir-ve-nasil-ayarlanir/) dokümanına göz atabilirsiniz. Bu rehberdeki kurallar Hipcall Webkancaları v1 altyapısını kapsamaktadır; ilerleyen dönemde [Standard Webhooks](https://www.standardwebhooks.com/) standardına uygun v2 sürümü geliştirilecektir.
 
 ## Parametre listesi
 
