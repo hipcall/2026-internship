@@ -333,7 +333,7 @@ Farkı kapatmanın tek kesin yolu **Webhook + REST API Mutabakatı (Reconciliati
 ## Community Konusu
 
 Hipcall Community forumunda Bölüm D bulgularını ve teslimat mimarisini tartışmak üzere açılan başlık:
-* **Başlık:** [Webhook'larda eksik çağrı verilerini nasıl tamamlayabiliriz?](https://community.hipcall.com/t/webhook-teslimat-garantisi-olmadiginda-eksiksiz-arsiv/104)
+* **Başlık:** [Webhook'larda eksik çağrı verilerini nasıl tamamlayabiliriz?](https://community.hipcall.com/t/webhooklarda-eksik-cagri-verilerini-nasil-tamamlayabiliriz/263?u=fansa)
 
 ---
 
