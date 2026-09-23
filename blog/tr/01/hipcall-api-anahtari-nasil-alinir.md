@@ -18,20 +18,24 @@ status: review
 
 ## Genel bakış
 
-Hipcall API, bulut santral altyapınızı kurum içi yazılımlarınıza, CRM platformunuza veya özel iş akışlarınıza entegre etmenizi sağlar. API üzerinden çağrı başlatabilir, çağrı kayıtlarını dışarı aktarabilir, müşteri verilerini anlık olarak temsilcinin ekranına taşıyabilir ve gelen aramaları yönetebilirsiniz.
+Hipcall API, bulut santral altyapınızı kurum içi yazılımlarınıza, CRM platformunuza veya özel iş akışlarınıza entegre etmenizi sağlar. API üzerinden programatik çağrı başlatabilir, çağrı kayıtlarını dışarı aktarabilir, müşteri verilerini anlık olarak temsilcinin ekranına taşıyabilir ve santral yönlendirmelerini yönetebilirsiniz.
 
-Bu rehberde, Hipcall yönetim panelinden bir API anahtarı (Personal Access Token) oluşturmayı ve `/profile` endpoint'ine ilk kimlik doğrulamalı HTTP isteğinizi göndermeyi uygulayacağız.
+Bu rehberde şu temel adımları uyguluyoruz:
+- Yönetim panelinde uygun yetki ve geçerlilik süresiyle bir API anahtarı (Personal Access Token) oluşturma.
+- API anahtarını çevre değişkenlerinde güvenli şekilde saklama ve `Authorization: Bearer` başlığıyla ilk isteği gönderme.
+- `/profile` endpoint'inden dönen kullanıcı, santral numaraları ve hız sınırı (rate limit) meta verilerini inceleme.
+- Kimlik doğrulama hatalarını (401 Unauthorized) ve üretim ortamı güvenlik kurallarını yönetme.
 
 ## Başlamadan önce
 
-API anahtarı oluşturabilmek için hesabınızın **Yönetici (Admin)** veya **Kurucu (Founder)** rolüne sahip olması gerekir. Standart kullanıcı hesapları güvenlik gereği geliştirici ayarlarına erişemez.
+API anahtarı oluşturabilmek için hesabınızın **Yönetici** veya **Kurucu** rolüne sahip olması gerekir. Standart kullanıcı hesapları güvenlik gereği geliştirici ayarlarına erişemez.
 
-1. `https://use.hipcall.com.tr/` adresinden Hipcall paneline giriş yapın.
-2. Sol menüden **Ayarlar > Geliştirici (Settings > Developer)** sayfasına gidin.
+1. `https://use.hipcall.com.tr/` adresinden Hipcall yönetim paneline giriş yapın.
+2. Sol menüden **Ayarlar > Geliştirici** sayfasına gidin.
 3. **API** sekmesini seçin.
-4. **Yeni (New)** butonuna tıklayın.
-5. Anahtarınız için açıklayıcı bir **Ad (Name)** girin (Örn: `CRM Entegrasyonu`).
-6. **Son geçerlilik tarihi (Expiration date)** belirleyin. Süre en az 1 gün, en fazla 3 yıl olabilir (varsayılan süre 1 yıldır).
+4. **Yeni** butonuna tıklayın.
+5. Anahtarınız için açıklayıcı bir **Ad** girin (Örn: `CRM Entegrasyonu`).
+6. **Son geçerlilik tarihi** belirleyin. Süre en az 1 gün, en fazla 3 yıl olabilir (varsayılan süre 1 yıldır).
 7. **Oluştur** butonuna tıklayın.
 
 Oluşturma işleminin hemen ardından Hipcall gizli anahtarın tamamını ekranda gösterir. Sayfadan ayrılmadan önce bu anahtarı güvenli bir şifre yöneticisine kaydedin. Sayfa kapandıktan sonra anahtarın açık hali bir daha görüntülenemez; panelde güvenlik amacıyla yalnızca maskelenmiş biçimi listelenir.

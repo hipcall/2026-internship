@@ -20,7 +20,11 @@ status: review
 
 The Hipcall API allows you to integrate cloud telephony into your internal systems, CRM platforms, and custom business automations. Through the API, you can originate calls, export call detail records (CDRs), stream caller context to agent screens, and manage telephony routing programmatically.
 
-In this guide, you will learn how to create a Personal Access Token in the Hipcall dashboard and send your first authenticated HTTP request to the `/profile` endpoint.
+In this guide, you will implement the following foundational steps:
+- Generating a Personal Access Token in the dashboard with appropriate role permissions and expiration limits.
+- Storing your token securely in environment variables and passing it via the standard `Authorization: Bearer` header.
+- Querying the `/profile` endpoint to inspect authenticated user context, assigned numbers, and rate limits.
+- Troubleshooting authentication failures (HTTP 401 Unauthorized) and applying production security best practices.
 
 ## Before you start
 
