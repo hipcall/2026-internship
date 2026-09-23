@@ -45,11 +45,11 @@ Bu rehberde Hipcall panelinde webhook yapılandırmayı, 50 milisaniye altında 
 
 Webhook entegrasyonunu Hipcall web panelinde oluşturun:
 
-1. **Ayarlar > Entegrasyonlar > Kataloğa Göz At (Settings > Integrations > Marketplace)** sayfasına gidin.
+1. **Ayarlar > Entegrasyonlar > Kataloğa Göz At** sayfasına gidin.
 2. Entegrasyon kataloğundan **Web kancası (Webhook)** seçeneğini belirleyin.
 3. Gerekli alanları doldurun:
    - **Ad (Zorunlu):** Entegrasyon için tanımlayıcı bir isim girin (Örn: `Çağrı Kaydı Alıcısı`).
-   - **URL (Zorunlu):** Gizli yol parçasını içeren genel HTTPS adresinizi yazın: `https://your-server.example.com/hipcall/events/whsec_live_9a8f2e4c1b0d`.
+   - **URL (Zorunlu):** Gizli yol parçasını içeren genel HTTPS adresinizi yazın: `https://your-server.example.com/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx`.
    - **Olaylar:** Abone olmak istediğiniz çağrı olaylarını seçin: `call_init`, `call_bridged` ve `call_hangup`.
 4. **Kayıtlar (Logs)** sekmesini açın. Webhook isteklerinin loglanması **Hata Ayıklama Modu (Debug Mode)** ile yönetilir. Geliştirme esnasında açıldığında, sistem iki saat boyunca istek gövdelerini ve durum kodlarını kaydeder; ardından log tutmayı otomatik kapatıp günlükleri temizler.
 
@@ -116,14 +116,14 @@ Gelen HTTP başlıkları incelendiğinde şu yapı görülür:
 
 ```http
 Host: your-server.example.com
-User-Agent: mint/1.9.0
+User-Agent: Hipcall-Webhook/1.0
 Content-Type: application/json
 Accept-Encoding: gzip
 X-Forwarded-For: 31.192.211.2
 X-Forwarded-Proto: https
 ```
 
-Başlıklarda `X-Signature` veya `X-Hub-Signature` gibi bir imza başlığı yer almaz. İstekleri gönderen istemci Elixir tabanlı `mint/1.9.0` kütüphanesidir.
+Gelen başlıklarda `X-Signature` veya `X-Hub-Signature` gibi bir HMAC imza başlığı yer almaz.
 
 ## Olayların taşıdığı veriler
 
@@ -178,10 +178,10 @@ flowchart TD
 Hipcall alıcıdan yanıtı en fazla 15 saniye içinde bekler. Alıcı HTTP isteğini bekletip ses kaydı indirmeye veya veritabanı kilitlerine girdiğinde bağlantı zaman aşımına uğrar. Üstelik 1 saat içinde 4 kez başarısız yanıt (veya zaman aşımı) oluşursa santral entegrasyonu otomatik olarak "Kırık" durumuna alır ve siz elle müdahale edene kadar tüm webhook akışını durdurur.
 
 İşlem sırası şu şekilde olmalıdır:
-1. Gizli anahtar doğrulamasını gerçekleştirin ($\sim 1\text{ ms}$).
+1. Gizli anahtar doğrulamasını gerçekleştirin (yaklaşık 1 ms).
 2. JSON gövdesini çözün.
 3. Veriyi belleğe veya iş kuyruğuna alın.
-4. **Anında HTTP `200 OK` cevabı dönün** ($< 50\text{ ms}$).
+4. **Anında HTTP `200 OK` cevabı dönün** (< 50 ms).
 5. Dosya yazma ve ses indirme işlemlerini arka plan görevinde tamamlayın.
 
 ### 2. Tekilleştirme (Idempotency)
@@ -210,7 +210,7 @@ Hipcall HMAC imza başlığı iletmediği için alıcı adresinizi iki yöntemle
 
 1. **Gizli URL yolu:** URL rotasına tahmin edilemez bir anahtar yerleştirin:
    ```
-   POST /hipcall/events/whsec_live_9a8f2e4c1b0d
+   POST /hipcall/events/whsec_live_xxxxxxxxxxxxxxxx
    ```
    Bu anahtarı taşımayan tüm istekleri doğrudan HTTP `401 Unauthorized` ile reddedin.
 2. **IP beyaz listesi:** Güvenlik duvarınızda (Nginx veya Cloudflare) gelen istekleri yalnızca Hipcall santralinin çıkış IP adresine (`31.192.211.2`) izin verecek şekilde sınırlandırın.
@@ -242,7 +242,7 @@ var jsonOptions = new JsonSerializerOptions
     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_9a8f2e4c1b0d";
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
 var baseDir = Directory.GetCurrentDirectory();
 var callsFilePath = Path.Combine(baseDir, "calls.json");
 var fileLock = new object();
@@ -471,3 +471,4 @@ Ayrıntılı yapılandırma ve güncel rehberler için Hipcall'ın resmi [Webkan
 - Ani çağrı yoğunluklarında HTTP alıcısı ile veritabanı arasına RabbitMQ veya Redis Streams gibi bir mesaj kuyruğu yerleştirin.
 - Dosya tabanlı `calls.json` yapısından PostgreSQL veya SQL Server veritabanına geçin ve `uuid` kolonuna `UNIQUE` indeks ekleyin.
 - Hipcall'ın `GET /api/v3/calls` REST API'sini kullanan gece mutabakat servisini Windows Görev Zamanlayıcısı'na (Task Scheduler) bağlayarak sıfır veri kaybını garanti altına alın.
+- Entegrasyon sorularınızı veya webhook mimarisi deneyimlerinizi [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.

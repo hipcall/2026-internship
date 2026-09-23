@@ -45,13 +45,13 @@ Ensure you have the following prerequisites configured:
 
 Configure your webhook integration in the Hipcall web dashboard:
 
-1. Navigate to **Settings > Integrations > Marketplace (Ayarlar > Entegrasyonlar > Kataloğa Göz At)**.
-2. Select **Webhooks (Web kancası)** from the integration catalog.
+1. Navigate to **Settings > Integrations > Marketplace**.
+2. Select **Webhooks** from the integration catalog.
 3. Fill in the integration details:
-   - **Name (Zorunlu):** Provide an identifier such as `Production CDR Receiver`.
-   - **URL (Zorunlu):** Enter your public HTTPS URL including a secret route path: `https://your-server.example.com/hipcall/events/whsec_live_9a8f2e4c1b0d`.
+   - **Name (Required):** Provide an identifier such as `Production CDR Receiver`.
+   - **URL (Required):** Enter your public HTTPS URL including a secret route path: `https://your-server.example.com/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx`.
    - **Events:** Check the call events you want to subscribe to: `call_init`, `call_bridged`, and `call_hangup`.
-4. Open the **Logs (Kayıtlar)** tab. Webhook logging is controlled by **Debug Mode (Hata Ayıklama Modu)**. When activated during development, debug mode captures payload bodies and response status codes for up to two hours before automatically turning off and clearing log entries.
+4. Open the **Logs** tab. Webhook logging is controlled by **Debug Mode**. When activated during development, debug mode captures payload bodies and response status codes for up to two hours before automatically turning off and clearing log entries.
 
 ## Receiving your first event
 
@@ -97,12 +97,12 @@ Hipcall dispatches requests with `Content-Type: application/json`. Every payload
   "data": {
     "uuid": "9a266251-d2a3-44fc-b422-9486ddf880c7",
     "direction": "outbound",
-    "caller_number": "+90850XXXXXXX",
-    "callee_number": "+90530XXXXXXX",
+    "caller_number": "+442079460123",
+    "callee_number": "+447700900123",
     "call_duration": 14,
     "missing_call": false,
     "hangup_by": "contact",
-    "record_url": "https://storage.hipcall.com.tr/recordings/1412/2026/09/21/9a266251-d2a3-44fc-b422-9486ddf880c7.mp3?X-Amz-Expires=604800...",
+    "record_url": "https://storage.hipcall.com/recordings/1412/2026/09/21/9a266251-d2a3-44fc-b422-9486ddf880c7.mp3?X-Amz-Expires=604800...",
     "started_at": "2026-09-21T10:37:07Z",
     "answered_at": "2026-09-21T10:37:07Z",
     "ended_at": "2026-09-21T10:37:21Z"
@@ -116,14 +116,14 @@ Examining the raw HTTP headers reveals:
 
 ```http
 Host: your-server.example.com
-User-Agent: mint/1.9.0
+User-Agent: Hipcall-Webhook/1.0
 Content-Type: application/json
 Accept-Encoding: gzip
 X-Forwarded-For: 31.192.211.2
 X-Forwarded-Proto: https
 ```
 
-Notice that Hipcall does not include signature headers such as `X-Signature` or `X-Hub-Signature`. The dispatch client is Elixir's `mint/1.9.0`.
+Notice that incoming webhook requests do not include cryptographic signature headers such as `X-Signature` or `X-Hub-Signature`.
 
 ## What each event carries
 
@@ -178,10 +178,10 @@ flowchart TD
 Hipcall expects a response within 15 seconds. If your receiver blocks the HTTP connection to download call audio or wait for database locks, the request times out. Furthermore, if four failed responses (or timeouts) occur within a one-hour window, Hipcall trips the integration into "Broken" status and completely stops dispatching events until manually reset.
 
 Follow this execution pipeline:
-1. Validate authentication token ($\sim 1\text{ ms}$).
+1. Validate authentication token (around 1 ms).
 2. Deserialize the JSON payload.
 3. Queue the data in memory or message broker.
-4. **Return HTTP `200 OK` immediately** ($< 50\text{ ms}$).
+4. **Return HTTP `200 OK` immediately** (< 50 ms).
 5. Process disk writes and audio downloads in a background worker.
 
 ### 2. Idempotency
@@ -210,7 +210,7 @@ Because Hipcall does not send HMAC signature headers, protect your public endpoi
 
 1. **Shared secret path:** Place an unpredictable secret token inside the URL path:
    ```
-   POST /hipcall/events/whsec_live_9a8f2e4c1b0d
+   POST /hipcall/events/whsec_live_xxxxxxxxxxxxxxxx
    ```
    Reject any request lacking this token with HTTP `401 Unauthorized`.
 2. **IP whitelisting:** Restrict incoming traffic at your reverse proxy (Nginx or Cloudflare) to Hipcall's outbound IP address (`31.192.211.2`).
@@ -242,7 +242,7 @@ var jsonOptions = new JsonSerializerOptions
     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_9a8f2e4c1b0d";
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
 var baseDir = Directory.GetCurrentDirectory();
 var callsFilePath = Path.Combine(baseDir, "calls.json");
 var fileLock = new object();
@@ -442,11 +442,11 @@ If your receiver takes longer than 15 seconds to respond, Hipcall terminates the
 
 ### 3. Failure limits and the "Broken" status
 When your receiver returns four failed responses (any status code other than 200 or 15-second timeouts) within a rolling one-hour window:
-- Hipcall protects PBX resources by automatically setting the integration status to **Broken ("Kırık")** with a red badge.
+- Hipcall protects PBX resources by automatically setting the integration status to **Broken** with a red badge.
 - When marked as Broken, Hipcall halts all subsequent webhook dispatches until manually reactivated.
-- **How to recover:** Open the integration in the dashboard, click **Edit ("Düzenle")**, toggle the status switch back to **Active ("Aktif")**, and click **Save ("Kaydet")**.
+- **How to recover:** Open the integration in the dashboard, click **Edit**, toggle the status switch back to **Active**, and click **Save**.
 
-For further configuration details, consult the official guide on [What are webhooks and how to set them up?](https://yardim.hipcall.com/gelistirme-araclari/webkancalari-nelerdir-ve-nasil-ayarlanir/). The specifications in this guide cover Hipcall Webhooks v1; an upcoming v2 specification aligned with [Standard Webhooks](https://www.standardwebhooks.com/) is currently under development.
+For further configuration details, consult the [Hipcall API Reference](https://use.hipcall.com/api-docs/). The specifications in this guide cover Hipcall Webhooks v1; an upcoming v2 specification aligned with [Standard Webhooks](https://www.standardwebhooks.com/) is currently under development.
 
 ## Parameter reference
 
@@ -456,12 +456,12 @@ The following fields are delivered inside the `data` object for call events:
 |---|---|---|---|
 | `uuid` | string | `"9a266251-d2a3-44fc-b422-9486ddf880c7"` | Unique, immutable call session identifier. |
 | `direction` | string | `"outbound"` | Call direction (`"inbound"` or `"outbound"`). |
-| `caller_number` | string | `"+90850XXXXXXX"` | Originating phone number (E.164 formatted). |
-| `callee_number` | string | `"+90530XXXXXXX"` | Destination phone number (E.164 formatted). |
+| `caller_number` | string | `"+442079460123"` | Originating phone number (E.164 formatted). |
+| `callee_number` | string | `"+447700900123"` | Destination phone number (E.164 formatted). |
 | `call_duration` | integer | `14` | Total billable audio conversation duration in seconds. |
 | `missing_call` | boolean | `false` | Indicates an unanswered inbound call (`true`). |
 | `hangup_by` | string | `"contact"` | Party terminating the call (`"user"`, `"contact"`, `"system"`). |
-| `record_url` | string/null | `"https://storage.hipcall.com.tr/..."` | Presigned AWS S3 audio download URL. |
+| `record_url` | string/null | `"https://storage.hipcall.com/..."` | Presigned AWS S3 audio download URL. |
 | `started_at` | string | `"2026-09-21T10:37:07Z"` | UTC timestamp when session was initialized. |
 | `answered_at` | string/null | `"2026-09-21T10:37:07Z"` | UTC timestamp when call was answered. |
 | `ended_at` | string/null | `"2026-09-21T10:37:21Z"` | UTC timestamp when session ended. |
@@ -471,3 +471,4 @@ The following fields are delivered inside the `data` object for call events:
 - Set up a durable message broker (such as RabbitMQ or AWS SQS) between the HTTP receiver and database workers to handle burst call volumes.
 - Migrate from `calls.json` to PostgreSQL or SQL Server with a `UNIQUE` constraint on the `uuid` column.
 - Implement the nightly reconciliation service using Hipcall's `GET /api/v3/calls` REST API and schedule it via Windows Task Scheduler or cron to guarantee zero data loss.
+- Share your webhook receiver implementation or ask questions in the [Hipcall Community](https://community.hipcall.com/).
