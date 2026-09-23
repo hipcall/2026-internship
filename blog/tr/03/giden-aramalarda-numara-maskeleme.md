@@ -8,7 +8,7 @@ pubDate: 2026-09-18
 categories: [developers]
 intent: informational
 translationKey: how-to-mask-phone-numbers-in-outbound-calls
-tags: [api, cagri, gizlilik, click-to-call]
+tags: [api, calls, privacy, click-to-call]
 authors: [hipcall-team]
 featured: false
 draft: true
@@ -26,17 +26,17 @@ Hipcall API ile kendi uygulamanız veya CRM sisteminiz üzerinden programatik ç
 
 API üzerinden çağrı başlatmak için şu ön koşulları tamamlayın:
 
-- **API anahtarı:** Hipcall panelinizde Settings > Developer (Ayarlar > Geliştirici) menüsünden bir API anahtarı oluşturun.
+- **API anahtarı:** Hipcall panelinizde Ayarlar > Geliştirici menüsünden bir API anahtarı oluşturun.
 - **Kayıtlı bir cihaz:** Çağrının çıkacağı kullanıcının veya dahilinin Hipcall web, masaüstü veya mobil uygulamasında kayıtlı (çevrimiçi) olması gerekir.
 - **Kurumsal dış numara:** Müşteriye arayan numara olarak gösterilecek aktif bir dış numaranız bulunmalıdır. Mevcut dış numaralarınızı `GET /api/v3/numbers` endpoint'i ile listeleyebilirsiniz.
 
 API anahtarınızı terminal oturumunuzda ortam değişkeni olarak tanımlayın:
 
 ```bash
-export HIPCALL_API_TOKEN="api-anahtariniz"
+export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-## Adım 1: Temel çağrı başlatma
+## Click-to-call ile çağrı başlatma
 
 Temsilci adına dış arama başlatmanın standart yolu `/users/{user_id}/call` endpoint'ine HTTP POST isteği göndermektir. Aranacak müşteri numarasını uluslararası E.164 formatında (`+90...`) belirtin.
 
@@ -74,15 +74,42 @@ curl -X "POST" "https://use.hipcall.com.tr/api/v3/users/4200/call" \
   }'
 ```
 
-`number_id` parametresi ile ilgili temel kurallar şunlardır:
+`number_id` parametresi ile ilgili temel kurallar:
 
-1. **Varsayılan Davranış:** `number_id` göndermezseniz, temsilcinin Hipcall profilinde tanımlı olan varsayılan dış numara (`default_number`) kullanılır. Kullanıcılar varsayılan numaralarını panelde Settings > Profile (Ayarlar > Profil) altından değiştirebilir.
+1. **Varsayılan Davranış:** `number_id` göndermezseniz, temsilcinin Hipcall profilinde tanımlı olan varsayılan dış numara (`default_number`) kullanılır. Kullanıcılar varsayılan numaralarını panelde Ayarlar > Profil altından değiştirebilir.
 2. **Kavram Ayrımı:** `callee_number` aramak istediğiniz hedef kişiyi, `number_id` ise santralin aramayı başlatırken karşı tarafa göstereceği kendi kayıtlı numaranızın ID'sini ifade eder.
 3. **Dahili Aramaları:** `/extensions/{extension_id}/call` endpoint'i üzerinden çağrı başlatırken `number_id` parametresinin iletilmesi zorunludur; `/users/{user_id}/call` endpoint'inde ise isteğe bağlıdır.
 
-### C# ile çağrı başlatma sınıfı
+## Numara maskelemeyi etkinleştirme
 
-Aşağıdaki sınıf, tek bir `HttpClient` kullanarak ortam değişkeninden API anahtarını okur, maskeleme ve numara seçimini destekler ve hata durumlarında API cevap gövdesini korur:
+Müşterinin telefon numarasını temsilcinin ekranından gizlemek için isteğe `call_masking: true` parametresini ekleyin. Temsilcinin ekranında anlamsız sıfırlar yerine çağrının içeriğini belirten bir etiket göstermek için `call_masking_name` alanını kullanın:
+
+```bash
+curl -X "POST" "https://use.hipcall.com.tr/api/v3/users/4200/call" \
+  -H "accept: application/json" \
+  -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "callee_number": "+90530XXXXXXX",
+    "call_masking": true,
+    "call_masking_name": "Siparis #1042",
+    "number_id": 943,
+    "ring_user_first": true
+  }'
+```
+
+### Maskelenmiş çağrının görünümü
+
+- **Temsilci Ekranı:** `call_masking: true` olduğunda temsilcinin ekranındaki gerçek numara gizlenir. `call_masking_name` belirtilmemişse ekranda `0000000000` metni görünür; belirtilmişse (örneğin `"Siparis #1042"`) sıfırların yerini bu etiket alır. Temsilci müşterinin telefon numarasını kopyalayamaz veya göremez.
+- **Müşteri Ekranı:** Müşteri tarafında temsilcinin şahsi numarası hiçbir zaman iletilmez. Müşterinin telefonunda `number_id` ile belirlenen kurumsal dış numara görünür.
+
+### Çağrı kayıtlarında (CDR) gerçek numara
+
+Numara maskeleme işlemi kullanıcı arayüzü düzeyinde uygulanır. Faturalandırma, yasal telekom zorunlulukları ve şirket yöneticilerinin raporlama ihtiyaçları için santral veri tabanındaki çağrı kayıtlarında (`GET /api/v3/calls`) gerçek E.164 numaralar eksiksiz olarak tutulur.
+
+## C# ile çağrı başlatma uygulaması
+
+Aşağıdaki sınıf, tek bir `HttpClient` kullanarak ortam değişkeninden API anahtarını okur, maskeleme ve kurumsal numara seçimini destekler ve hata durumlarında API cevap gövdesini korur:
 
 ```csharp
 using System.Net.Http.Headers;
@@ -98,7 +125,7 @@ public sealed class HipcallClient
     public HipcallClient()
     {
         _apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN")
-            ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni bulunamadı.");
+            ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni tanımlı değil.");
     }
 
     public async Task<string> StartCallAsync(
@@ -148,32 +175,27 @@ public sealed class HipcallClient
 }
 ```
 
-## Adım 2: Numara maskelemeyi açma
+Betiği projenizde çağırmak için:
 
-Müşterinin telefon numarasını temsilcinin ekranından gizlemek için isteğe `call_masking: true` parametresini ekleyin. Temsilcinin ekranında anlamsız sıfırlar yerine çağrının içeriğini belirten bir etiket göstermek için `call_masking_name` alanını kullanın:
+```csharp
+var client = new HipcallClient();
+string callId = await client.StartCallAsync(
+    userId: 4200,
+    calleeNumber: "+90530XXXXXXX",
+    ringUserFirst: true,
+    numberId: 943,
+    callMasking: true,
+    callMaskingName: "Siparis #1042"
+);
 
-```bash
-curl -X "POST" "https://use.hipcall.com.tr/api/v3/users/4200/call" \
-  -H "accept: application/json" \
-  -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "callee_number": "+90530XXXXXXX",
-    "call_masking": true,
-    "call_masking_name": "Siparis #1042",
-    "number_id": 943,
-    "ring_user_first": true
-  }'
+Console.WriteLine($"Çağrı kuyruğa alındı. Çağrı ID: {callId}");
 ```
 
-### Maskelenmiş çağrının görünümü
+### Önemli mimari detaylar
 
-- **Temsilci Ekranı:** `call_masking: true` olduğunda temsilcinin ekranındaki gerçek numara gizlenir. `call_masking_name` belirtilmemişse ekranda `0000000000` metni görünür; belirtilmişse (örneğin `"Siparis #1042"`) sıfırların yerini bu etiket alır. Temsilci müşterinin telefon numarasını kopyalayamaz veya göremez.
-- **Müşteri Ekranı:** Müşteri tarafında temsilcinin şahsi numarası hiçbir zaman iletilmez. Müşterinin telefonunda `number_id` ile belirlenen kurumsal dış numara görünür.
-
-### Çağrı kayıtlarında (CDR) gerçek numara
-
-Numara maskeleme işlemi kullanıcı arayüzü düzeyinde uygulanır. Faturalandırma, yasal telekom zorunlulukları ve şirket yöneticilerinin raporlama ihtiyaçları için santral veri tabanındaki çağrı kayıtlarında (`GET /api/v3/calls`) gerçek E.164 numaralar eksiksiz olarak tutulur.
+- **Tek HttpClient kullanımı:** Her çağrı isteği için yeni bir HTTP istemcisi oluşturulmaz; `static readonly HttpClient` soket tükenmesini engeller.
+- **Hata gövdesini koruma:** HTTP başarısızlık durumunda istisna fırlatılmadan önce API gövdesi okunarak hata mesajı geliştiriciye eksiksiz aktarılır.
+- **Opsiyonel parametre esnekliği:** Maskeleme ve `number_id` parametreleri isteğe bağlıdır; değer verilmediğinde varsayılan kullanıcı profili ayarları devreye girer.
 
 ## API yanıtı ne anlama geliyor?
 
@@ -241,11 +263,11 @@ Sistemde karşılığı bulunmayan bir kullanıcı veya dahili ID'si girildiğin
 
 **Çözüm:** `GET /api/v3/users` veya `GET /api/v3/extensions` endpoint'lerini çağırarak ilgili kullanıcının `id` değerini doğrulayın.
 
-### E.164 formatı ve ülke ön eki yorumu
+### E.164 formatı ve ülke ön eki çözümlemesi
 
-`callee_number` alanına `+905551112233` yerine sıfırla başlayan yerel bir numara (`05551112233`) veya boşluklu bir değer (`555 111 22 33`) gönderdiğinizde API hata döndürmez ve `201 Created` yanıtı verir.
+`callee_number` alanına `+905551112233` yerine sıfırla başlayan yerel bir numara (`05551112233`) veya boşluklu bir değer (`555 111 22 33`) gönderdiğinizde API isteği reddetmez ve `201 Created` yanıtı verir.
 
-Hipcall santrali numaradaki boşlukları ve baştaki yerel çıkış kodunu (`0`) temizler. Numarayı, kullanıcının ve hesabın profilinde yer alan `phone_prefix` (`TR`) ve `locale` (`tr_TR`) ayarlarına göre Türkiye ülke koduyla (`+90`) tamamlayarak yorumlar. Ancak farklı ülke ön eklerine sahip çok lokasyonlu hesaplarda olası karışıklıkları önlemek için her zaman tam E.164 formatını kullanın.
+Hipcall santrali numaradaki boşlukları ve baştaki yerel çıkış kodunu (`0`) temizler. Numarayı, kullanıcının ve hesabın profilinde yer alan `phone_prefix` (`TR`) ve `locale` (`tr_TR`) ayarlarına göre Türkiye ülke koduyla (`+90`) tamamlayarak yorumlar. Ancak farklı ülke ön eklerine sahip çok lokasyonlu hesaplarda olası yönlendirme karışıklıklarını önlemek için her zaman tam E.164 formatını kullanın.
 
 ## Parametre listesi
 
@@ -259,8 +281,6 @@ Hipcall santrali numaradaki boşlukları ve baştaki yerel çıkış kodunu (`0`
 
 ## Sonraki adımlar
 
-Maskeli dış aramaları başarıyla başlattıktan sonraki adım, çağrıların gerçek sonucunu takip etmektir:
-
 - Çağrı bittiğinde tetiklenen olayları anlık yakalamak için Webhook alıcıları rehberini inceleyin.
-- Diğer arama parametrelerini ve filtreleri görmek için [Hipcall API Referansı](https://use.hipcall.com/api-docs/) sayfasını ziyaret edin.
-- Entegrasyon deneyimlerinizi paylaşmak veya sorularınızı iletmek için [Hipcall Community](https://community.hipcall.com/) forumuna katılın.
+- Diğer arama parametrelerini ve filtreleri görmek için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasını ziyaret edin.
+- Entegrasyon deneyimlerinizi paylaşmak veya sorularınızı iletmek için [Hipcall Topluluk](https://community.hipcall.com/) platformunda sorularınızı paylaşın.
