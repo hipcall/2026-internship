@@ -18,9 +18,15 @@ status: review
 
 ## Overview
 
-In call centers and sales teams, every missed call can represent a lost business opportunity or an unhandled support ticket. To enable teams to follow up on these calls promptly, call records must be regularly reported and exported to internal CRM or reporting systems.
+In call centers and sales teams, every missed call represents a lost business opportunity or an unhandled customer request. While downloading reports manually from the web dashboard works for ad-hoc reviews, automated CRM synchronization and scheduled callback workflows require an unattended, programmatic data pipeline.
 
-In this guide, we will step through using the Hipcall API to filter missed calls from the last 7 days by date and status parameters, iterate through all records using pagination, and build a working C# console application that exports the results directly to a CSV file.
+The Hipcall API allows you to query call detail records (CDRs) using flexible filters and ingest large datasets through robust pagination.
+
+In this guide, you will implement the following architectural workflow:
+- Narrowing query results using bracket filter syntax (`started_at[gte]`, `missing_call[eq]`).
+- Building an automated pagination loop driven by `meta.count` and `offset` that streams records without memory bloat.
+- Developing a production-ready C# console application utilizing a singleton `HttpClient` pattern to prevent socket exhaustion.
+- Formatting and streaming call records safely into a delimited CSV file with quote protection.
 
 ## Before you start
 
@@ -36,7 +42,7 @@ Set your API key as an environment variable in your terminal session:
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-## Filtering the calls you want
+## Filtering calls by date and status
 
 Hipcall API list endpoints utilize a flexible bracket filter syntax (`?field[operator]=value`).
 
@@ -97,9 +103,9 @@ flowchart TD
     G -- No --> I["All records collected, write to CSV"]
 ```
 
-## Complete script (C# Console Application)
+## Complete C# CSV export application
 
-The following C# application fetches missed calls from the last 7 days, collects all records across page boundaries, and writes them to a `missed-calls-YYYY-MM-DD.csv` file:
+The following C# console application fetches missed calls from the last 7 days, collects all records across page boundaries, and writes them to a `missed-calls-YYYY-MM-DD.csv` file:
 
 ```csharp
 using System.Net.Http.Headers;
@@ -171,7 +177,7 @@ Console.WriteLine($"Completed. {allCalls.Count} missed calls exported to {csvFil
 return 0;
 ```
 
-To run the script:
+To run the application:
 
 ```bash
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."

@@ -18,9 +18,15 @@ status: review
 
 ## Genel bakış
 
-Çağrı merkezlerinde ve satış ekiplerinde cevapsız kalan her çağrı, kaybedilmiş bir iş fırsatı veya yanıtlanamamış bir destek talebi anlamına gelebilir. Ekiplerin bu çağrılara hızla geri dönüş yapabilmesi için çağrı verilerinin düzenli olarak raporlanması ve CRM sistemlerine aktarılması gerekir.
+Çağrı merkezlerinde ve satış ekiplerinde cevapsız kalan her çağrı, kaybedilmiş bir iş fırsatı veya yanıtlanamamış bir müşteri talebi anlamına gelir. Yönetim panelinden manuel olarak rapor indirmek tek seferlik incelemeler için yeterli olsa da, CRM senkronizasyonu veya otomatik geri arama iş akışları kurmak için programatik bir veri boru hattına (data pipeline) ihtiyaç duyulur.
 
-Bu rehberde, Hipcall API'sini kullanarak son 7 gün içindeki cevapsız çağrıları tarih ve durum parametrelerine göre filtrelemeyi, sayfalama yapısını kullanarak tüm kayıtları eksiksiz dolaşmayı ve sonuçları doğrudan bir CSV dosyasına aktaran çalışan bir C# konsol uygulaması oluşturmayı adım adım uygulayacağız.
+Hipcall API, çağrı kayıtlarını esnek filtrelerle sorgulamanıza ve büyük veri kümelerini sayfalama mekanizmasıyla dışarı aktarmanıza olanak tanır.
+
+Bu rehberde şu mimari adımları uyguluyoruz:
+- Köşeli parantez filtre söz dizimiyle (`started_at[gte]`, `missing_call[eq]`) hedef veri kümesini daraltma.
+- `meta.count` ve `offset` parametrelerini kullanarak bellek tüketmeden tüm sayfaları dolaşan güvenilir bir sayfalama döngüsü kurma.
+- Soket tükenmesini (socket exhaustion) önleyen tekil `HttpClient` mimarisiyle verileri çeken bir C# konsol uygulaması geliştirme.
+- Alınan çağrı kayıtlarını standart tırnak korumasıyla biçimlendirip doğrudan CSV dosyasına yazma.
 
 ## Başlamadan önce
 
@@ -36,7 +42,7 @@ API anahtarınızı terminal oturumunuzda ortam değişkeni olarak tanımlayın:
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-## İstediğiniz çağrıları filtrelemek
+## Çağrıları tarih ve duruma göre filtreleme
 
 Hipcall API listeleme endpoint'lerinde esnek bir köşeli parantez filtre söz dizimi (`?alan[operatör]=değer`) kullanılır. 
 
@@ -97,9 +103,9 @@ flowchart TD
     G -- Hayır --> I["Tüm kayıtlar toplandı, CSV'ye yaz"]
 ```
 
-## Betiğin tamamı (C# Konsol Uygulaması)
+## C# ile CSV dışa aktarma uygulaması
 
-Aşağıdaki C# betiği son 7 günün cevapsız çağrılarını çeker, sayfalama sınırlarına takılmadan tüm veriyi toplar ve `missed-calls-YYYY-MM-DD.csv` dosyasına yazar:
+Aşağıdaki C# konsol uygulaması son 7 günün cevapsız çağrılarını çeker, sayfalama sınırlarına takılmadan tüm veriyi toplar ve `missed-calls-YYYY-MM-DD.csv` dosyasına yazar:
 
 ```csharp
 using System.Net.Http.Headers;
@@ -171,7 +177,7 @@ Console.WriteLine($"İşlem tamamlandı. {allCalls.Count} adet cevapsız çağr�
 return 0;
 ```
 
-Betiği çalıştırmak için:
+Uygulamayı çalıştırmak için:
 
 ```bash
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
