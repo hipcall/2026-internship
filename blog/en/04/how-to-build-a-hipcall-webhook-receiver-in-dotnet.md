@@ -18,22 +18,23 @@ status: review
 
 ## Overview
 
-Pushing call records into your data warehouse, CRM, or billing system usually starts with periodic polling. You query a list endpoint every few minutes and look for newly closed calls. While polling works for batch reporting, it introduces latency and consumes unnecessary API rate limits when no calls are active.
+Syncing call records into your data warehouse, CRM, or billing system through periodic polling consumes API rate limits and leaves your systems lagging tens of seconds behind active conversations.
 
-Webhooks reverse that model. When a call starts, bridges to an agent, or terminates, the Hipcall PBX dispatches an HTTP POST request directly to your server.
+Webhooks transform this ingestion pipeline into an instant, event-driven stream. Whenever a call initiates, connects to an agent, or wraps up, the Hipcall PBX delivers an HTTP POST request straight to your application. The moment a call ends, talk duration, termination disposition, and recording links flow directly into your database with zero lag.
 
-Receiving an HTTP request is straightforward. Building a production-grade webhook receiver requires solving three architectural realities:
-1. Hipcall dispatches webhooks with an at-most-once delivery model without automatic retries.
-2. Incoming webhook requests do not contain cryptographic HMAC signature headers (`X-Signature`), with a Standard Webhooks v2 implementation planned on the product roadmap.
-3. Telephony dispatchers enforce a strict 15-second HTTP timeout and automatically trip the integration status to "Broken" if four failed responses occur within a single hour.
+Building a production-ready webhook receiver that runs reliably under high call volume requires four core engineering practices:
+- **Acknowledging requests in under 50 milliseconds** to prevent dispatcher timeouts, offloading heavy tasks (audio archiving, database writes) to background queues.
+- **Securing unsigned webhook endpoints** using an unpredictable secret route token.
+- **Deduplicating events by UUID (idempotency)** to protect data integrity against network retries.
+- **Backing real-time streaming with a nightly reconciliation worker** to guarantee zero data loss during server restarts or transient outages.
 
-This guide walks through configuring a webhook in the Hipcall dashboard, building an ASP.NET Core Minimal API receiver that responds within 50 milliseconds, processing call audio asynchronously, deduplicating incoming records by UUID, and pairing real-time ingestion with scheduled reconciliation to guarantee zero data loss.
+In this guide, you will configure a webhook in the Hipcall dashboard, build a robust ASP.NET Core Minimal API receiver implementing these patterns, and establish an automated background archiving pipeline for call audio.
 
 ## Before you start
 
 Ensure you have the following prerequisites configured:
 
-- **.NET 8 SDK** installed on your workstation or server.
+- **.NET 8 SDK** installed on your workstation or server (`dotnet --version` outputs `8.0` or higher).
 - **A publicly accessible HTTPS endpoint.** For local development, install [ngrok](https://ngrok.com/) to expose port 5080:
   ```bash
   ngrok http 5080
@@ -62,9 +63,11 @@ dotnet new web -n Hipcall.WebhookReceiver
 cd Hipcall.WebhookReceiver
 ```
 
-Start with a baseline receiver that prints incoming headers and payloads to the console:
+Start with a baseline receiver that validates the secret key configured in the dashboard and logs incoming payloads to the console:
 
 ```csharp
+using System.Text;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
@@ -74,18 +77,25 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
 
 var app = builder.Build();
 
-app.MapPost("/hipcall/events", async (HttpRequest request) =>
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
+
+app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request) =>
 {
-    using var reader = new StreamReader(request.Body);
+    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    {
+        return Results.Unauthorized();
+    }
+
+    using var reader = new StreamReader(request.Body, Encoding.UTF8);
     var body = await reader.ReadToEndAsync();
-    Console.WriteLine(body);
+    Console.WriteLine($"Webhook received successfully:\n{body}");
     return Results.Ok();
 });
 
 app.Run();
 ```
 
-Run the application with `dotnet run` and trigger a call.
+Run the application with `dotnet run` and trigger a test call from the dashboard or your phone.
 
 ### Payload structure
 
@@ -139,25 +149,25 @@ A single phone call triggers multiple webhook events across its lifecycle.
 
 When initiating an outbound call via click-to-call, the Hipcall softphone automatically answers the representative's leg. Because the agent connects immediately, `call_init` and `call_bridged` arrive within one to two seconds of each other while the destination handset is still ringing.
 
-### Call recording URL lifespan
+### Call recording URL lifespan and persistent storage
 
-The `data.record_url` field in `call_hangup` points to an AWS S3 presigned URL. Inspecting the query string parameters shows `X-Amz-Expires=604800`, meaning the link remains valid for seven days. 
+The `data.record_url` field in `call_hangup` points to a temporary presigned AWS S3 URL (`X-Amz-Expires=604800`, valid for 7 days).
 
-Saving this temporary URL directly into your database creates broken links once the signature expires. Production systems must download the MP3 file to internal persistent storage during ingestion and reference your own permanent file path.
+The recommended approach for building an enterprise-grade call archive is to download the audio file asynchronously via a background worker when the webhook arrives and store it within your organization's own persistent storage (local disk, private S3 bucket, etc.) rather than saving the temporary link directly to the database.
 
-## Making it reliable
+## Designing a reliable architecture
 
-Building an enterprise-grade call archive on top of webhooks requires addressing delivery guarantees and authentication.
+When building a production-grade webhook receiver, four fundamental architectural principles apply:
 
 ```mermaid
 flowchart TD
-    A["Incoming Webhook"] --> B{"Validate Secret Path"}
+    A["Incoming Webhook Request"] --> B{"Validate Secret Path"}
     B -- "Invalid" --> C["401 Unauthorized"]
-    B -- "Valid" --> D["Parse Event and Check UUID"]
-    D --> E["Acknowledge HTTP 200 OK (< 50ms)"]
+    B -- "Valid" --> D["Parse Payload and Check UUID"]
+    D --> E["Acknowledge HTTP 200 OK (< 50 ms)"]
 
     subgraph BG ["Background Asynchronous Processing"]
-        F["Upsert Call Record in calls.json"]
+        F["Upsert Call Record in calls.json (Upsert)"]
         F --> G{"record_url exists?"}
         G -- "Yes" --> H["Download MP3 to recordings/ folder"]
         G -- "No" --> I["Complete"]
@@ -173,46 +183,41 @@ flowchart TD
     end
 ```
 
-### 1. Respond quickly, defer heavy work
+### 1. Respond quickly, defer heavy work to the background
 
-Hipcall expects a response within 15 seconds. If your receiver blocks the HTTP connection to download call audio or wait for database locks, the request times out. Furthermore, if four failed responses (or timeouts) occur within a one-hour window, Hipcall trips the integration into "Broken" status and completely stops dispatching events until manually reset.
+Hipcall expects a response within 15 seconds. If your receiver blocks the HTTP connection to download audio files or wait on database locks, the request risks timing out.
 
-Follow this execution pipeline:
-1. Validate authentication token (around 1 ms).
+The recommended execution pipeline:
+1. Validate the secret route token (around 1 ms).
 2. Deserialize the JSON payload.
-3. Queue the data in memory or message broker.
+3. Queue the data in memory or a message broker.
 4. **Return HTTP `200 OK` immediately** (< 50 ms).
 5. Process disk writes and audio downloads in a background worker.
 
-### 2. Idempotency
+### 2. Idempotency (Deduplication)
 
-Network retries or multi-event updates can deliver the same call session more than once.
-- Always use `data.uuid` as the primary deduplication key.
-- Never use timestamps or customer phone numbers for deduplication, as multiple calls can occur simultaneously.
-- Apply an upsert pattern: update the existing record when subsequent events for the same UUID arrive.
+Network blips or service updates can deliver the same call session more than once. To prevent data duplication:
+- Always use the immutable `data.uuid` as your primary deduplication key.
+- Never deduplicate by timestamp or phone number, as multiple calls can initiate in the exact same second.
+- Implement an upsert pattern to update existing records when subsequent events arrive.
 
 ### 3. Nightly reconciliation
 
-A webhook receiver running alone will suffer minor data loss over time due to application restarts, deployment rollouts, and network blips.
+A system that relies exclusively on live webhooks can experience small data gaps over time due to server restarts, deployment rollouts, or network interruptions.
 
-To guarantee a complete archive:
-- Deploy a scheduled job (Windows Task Scheduler, cron, or a background worker) that runs every night.
-- Query the Hipcall REST API for the desired time interval:
+To guarantee an audit-proof, 100% complete archive:
+- Deploy a scheduled background job (Windows Task Scheduler, cron, or a cloud worker) running nightly.
+- Query the Hipcall REST API for the day's calls:
   ```http
   GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&sort=started_at.asc&limit=100
   ```
-- Note that the API returns only completed calls and retains the last 12 months.
-- Calculate the set difference between the API's UUID list and your local database, then backfill any missing call records and audio files.
+- Compare the UUID list returned by the API with your local database to calculate the set difference.
+- Fetch and backfill any missing call metadata and audio recordings via the API to reconcile your archive down to the penny.
 
 ### 4. Securing unsigned endpoints
 
-Because Hipcall does not send HMAC signature headers, protect your public endpoint using two complementary strategies:
-
-1. **Shared secret path:** Place an unpredictable secret token inside the URL path:
-   ```
-   POST /hipcall/events/whsec_live_xxxxxxxxxxxxxxxx
-   ```
-   Reject any request lacking this token with HTTP `401 Unauthorized`.
+Because incoming requests do not include an HMAC signature header, secure your public endpoint using two complementary layers:
+1. **Secret route path:** Place an unpredictable secret token inside your route path (`/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx`) and immediately reject any request lacking this token with HTTP `401 Unauthorized`.
 2. **IP whitelisting:** Restrict incoming traffic at your reverse proxy (Nginx or Cloudflare) to Hipcall's outbound IP address (`31.192.211.2`).
 
 ## The full example
@@ -431,18 +436,18 @@ public class CallRecord
 
 Understanding failure states in Hipcall webhooks prevents silent outages:
 
-### 1. Returning HTTP 500
+### 1. HTTP 500 response and at-most-once delivery
 If your server encounters an internal error and returns `500 Internal Server Error`:
 - The telephone conversation continues uninterrupted; telephony routing is decoupled from webhook delivery.
 - Hipcall logs `500` in the integration logs.
-- **Hipcall does not retry the request.** The event is permanently dropped.
+- Hipcall does not automatically retry failed requests (at-most-once delivery model). For this reason, acknowledging with HTTP 200 immediately after enqueuing the payload and reconciling missing events via the nightly job are essential.
 
 ### 2. Timeouts
 If your receiver takes longer than 15 seconds to respond, Hipcall terminates the TCP connection and drops the event without recording a successful delivery.
 
-### 3. Failure limits and the "Broken" status
+### 3. Failed responses and "Broken" status
 When your receiver returns four failed responses (any status code other than 200 or 15-second timeouts) within a rolling one-hour window:
-- Hipcall protects PBX resources by automatically setting the integration status to **Broken** with a red badge.
+- Hipcall protects PBX resources by automatically setting the integration status to **Broken**.
 - When marked as Broken, Hipcall halts all subsequent webhook dispatches until manually reactivated.
 - **How to recover:** Open the integration in the dashboard, click **Edit**, toggle the status switch back to **Active**, and click **Save**.
 
