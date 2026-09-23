@@ -82,7 +82,7 @@ Hipcall list endpoints return a standard response envelope containing `data` and
 | `meta.offset` | Number of records skipped before this page. |
 | `meta.limit` | Maximum records returned per page (default: 10, maximum: 100). |
 
-The total page count is calculated using the formula `ceil(meta.count / meta.limit)`. To collect all records, increment `offset` by `limit` on each step within a loop:
+The total page count is calculated using the formula `ceil(meta.count / meta.limit)` (for example, with 142 matching records and a limit of 100, the first page returns 100 records and the second page returns 42). To collect all records, increment `offset` by `limit` on each step within a loop:
 
 ```mermaid
 flowchart TD

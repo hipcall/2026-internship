@@ -82,55 +82,7 @@ Hipcall liste endpoint'leri standart olarak `data` ve `meta` nesnelerinden oluş
 | `meta.offset` | Bu sayfadan önce atlanan kayıt sayısı. |
 | `meta.limit` | Sayfa başına döndürülen maksimum kayıt sayısı (varsayılan: 10, üst sınır: 100). |
 
-`count` 142 ve `limit` 100 ise, ilk sayfa 100, ikinci sayfa 42 kayıt döndürür. Toplam sayfa formülü:
-
-```text
-toplam_sayfa = ceil(count / limit)
-```
-
-100'ün üzerinde bir `limit` değeri göndermek, değeri sessizce 100'e düşürmez. API isteği `422` hatasıyla reddeder: `For 'limit': Value must be less than 100.`
-
-## İstediğiniz çağrıları filtrelemek
-
-HipCall filtreleri köşeli parantez söz dizimi kullanır:
-
-```
-?alan[operatör]=değer
-```
-
-Belirli bir tarih aralığındaki cevapsız çağrıları almak için missing_call, started_at[gte] ve started_at[lte] filtrelerini birlikte kullanabilirsiniz.
-
-```bash
-curl -sS -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
-  "https://use.hipcall.com.tr/api/v3/calls?missing_call%5Beq%5D=true&started_at%5Bgte%5D=2026-09-01T00%3A00%3A00Z&started_at%5Blte%5D=2026-09-08T00%3A00%3A00Z&limit=100"
-```
-
-Üç filtrenin açık hâli:
-
-| Filtre | Operatör | Değer | Amaç |
-|---|---|---|---|
-| `missing_call` | `eq` | `true` | Yalnızca cevapsız (cevaplanmamış) çağrılar. |
-| `started_at` | `gte` | `2026-09-01T00:00:00Z` | Bu tarih ve sonrasındaki çağrılar. |
-| `started_at` | `lte` | `2026-09-08T23:59:59Z` | Bu tarih ve öncesindeki çağrılar. |
-
-Tarihler ISO 8601 UTC formatında olmalıdır. `dün` gibi ISO dışı bir değer göndermek `422` hatası döndürür: `Invalid datetime format (expected ISO8601)`.
-
-Filtre adlarındaki köşeli parantezler (`[` ve `]`) URL'de `%5B` ve `%5D` olarak kodlanmalıdır. Bazı HTTP istemcileri bunu otomatik yapar, ancak .NET `HttpClient` dahil pek çoğu yapmaz. API filtrenizi yok sayıyorsa, parantezlerin sunucuya kodlanmadan (çıplak) ulaşıp ulaşmadığını kontrol edin.
-
-### Yön filtresi
-
-`direction` filtresi sayı değil, metin değeri alır (`inbound`, `outbound`). `direction[eq]=1` göndermek `Value must be a string.` hatasını döndürür.
-
-Birden fazla değeri aynı anda filtrelemek için `in` operatörünü virgülle ayrılmış değerlerle kullanın:
-
-```bash
-curl -sS -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
-  "https://use.hipcall.com.tr/api/v3/calls?direction%5Bin%5D=inbound,outbound"
-```
-
-## Tüm sayfaları dolaşmak
-
-Sayfalama döngüsü ilk cevapta `meta.count` değerini okur ve tüm kayıtlar toplanana kadar `offset` değerini `limit` kadar artırır.
+Toplam sayfa sayısı `ceil(meta.count / meta.limit)` formülüyle hesaplanır (örneğin 142 kayıt için 100'lük limit ile ilk sayfa 100, ikinci sayfa 42 kayıt döner). Tüm kayıtları toplamak için `offset` değerini her adımda `limit` kadar artırarak döngü kurarız:
 
 ```mermaid
 flowchart TD
