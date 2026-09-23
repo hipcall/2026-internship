@@ -18,9 +18,15 @@ status: review
 
 ## Overview
 
-In field services, online marketplaces, courier logistics, and human resources screening, connecting two parties while keeping their personal phone numbers private is a common business requirement. When a technician or delivery driver calls a customer directly from a mobile device, their personal phone number is exposed, and the customer's phone number is saved on an unmanaged personal handset. This creates privacy risks, compliance issues, and customer retention leaks.
+In field services, online marketplaces, courier logistics, and human resources screening, connecting two parties while keeping their personal phone numbers private is a vital security and compliance requirement. When a technician or delivery driver calls a customer directly from a personal phone, their mobile number is exposed to the customer; and when the customer calls back, they reach the employee's personal device. Storing customer numbers on unmanaged personal handsets also introduces serious GDPR and data privacy risks.
 
-With the Hipcall API, you can initiate outbound calls programmatically (click-to-call) from your CRM or internal application. By applying call masking parameters, both sides converse over your company PBX without either party seeing the other's personal phone number.
+The Hipcall API solves this by transforming outbound calls into a single, programmatic HTTP POST request (click-to-call). Through call masking parameters, both parties converse across a managed PBX bridge without either seeing the other's personal phone number.
+
+In this guide, you will implement the following architectural workflow:
+- Initiating outbound calls from your CRM and managing default corporate caller IDs.
+- Masking destination numbers on the agent interface using `call_masking` and contextual labels via `call_masking_name`.
+- Directing call progression order with `ring_user_first` to prevent customers from waiting on dead air.
+- Navigating the asynchronous nature of HTTP 201 responses and diagnosing silent drops when an agent is offline.
 
 ## Before you start
 
@@ -38,7 +44,7 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 
 ## Initiating outbound calls via click-to-call
 
-The standard method to initiate a call for an agent is sending an HTTP POST request to the `/users/{user_id}/call` endpoint. Provide the recipient's phone number in international E.164 format (`+44...`).
+Call masking is built directly on top of Hipcall's click-to-call infrastructure. The standard method to initiate a call for an agent is sending an HTTP POST request to the `/users/{user_id}/call` endpoint. Provide the recipient's phone number in international E.164 format (`+44...`):
 
 ```bash
 curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
@@ -79,6 +85,7 @@ Key rules regarding the `number_id` parameter:
 1. **Default Outbound Number:** If you omit `number_id`, Hipcall falls back to the user's default number (`default_number`) configured in their profile. Users can change their default number under Settings > Profile.
 2. **Parameter Distinction:** `callee_number` specifies the recipient you are dialing; `number_id` specifies the ID of your own registered number from which the call originates.
 3. **Extension Calls:** In `/extensions/{extension_id}/call`, specifying `number_id` is mandatory, whereas in `/users/{user_id}/call`, it remains optional.
+4. **Number Formatting (E.164):** While the Hipcall PBX can automatically strip leading national trunk zeros or whitespace based on account region settings, passing fully qualified E.164 format (`+44...`) in production avoids routing ambiguities across multi-location deployments.
 
 ## Enabling call masking
 
@@ -197,7 +204,7 @@ Console.WriteLine($"Call queued successfully. Call ID: {callId}");
 - **Preserving API error bodies:** When a non-200 response occurs, the full JSON payload is captured and exposed before an exception is raised, ensuring actionable feedback.
 - **Optional parameter defaults:** Masking and caller ID parameters are optional; when left unspecified, user-level profile defaults take precedence.
 
-## What the response means
+## Asynchronous call flow and the HTTP 201 response
 
 When the API accepts your request, it returns an HTTP `201 Created` status code containing a call UUID:
 
@@ -228,8 +235,8 @@ sequenceDiagram
 
 Understand the exact boundaries of this response:
 
-- **What it means:** The request payload was valid, authentication succeeded, and the PBX queued the call command in its telephony engine.
-- **What it does not mean:** It does not mean the customer answered, that the customer's phone rang, or that the audio bridge connected. Even if the agent's device is offline or in airplane mode, the API still returns `201 Created` because the command was queued; the PBX then drops the call silently when it fails to reach the agent.
+- **What it verifies:** The request payload was valid, authentication succeeded, and the PBX engine successfully queued the call command.
+- **What it does not guarantee:** It does not guarantee that the customer's phone rang, that the customer answered, or that an audio bridge was established. Even if the agent's device is offline or in airplane mode, the API returns HTTP `201 Created`; the PBX then terminates the session when it fails to reach the agent.
 
 Do not mark calls as "connected" or "completed" in your CRM based solely on a `201 Created` response. Monitor Webhooks or poll `GET /api/v3/calls` to check `bridged_at` and `call_duration`.
 
@@ -265,11 +272,12 @@ Returned when an invalid `user_id` or `extension_id` is supplied:
 
 **Fix:** Verify the user ID using `GET /api/v3/users` or extension ID using `GET /api/v3/extensions`.
 
-### E.164 formatting and regional prefix resolution
+### Offline agent device (Silent call drop)
 
-If you pass a national number starting with a local trunk prefix (such as `020 7946 0123` in the UK) or a string formatted with spaces, the API does not reject the request; it returns `201 Created`.
-
-The Hipcall PBX strips whitespaces and national trunk zeros. It resolves the number against the user and account `phone_prefix` and `locale` configuration (for instance, prepending `+44` for accounts configured with `phone_prefix: "GB"`). To prevent routing ambiguities across organizations operating across multiple regions, always pass fully qualified E.164 numbers (`+442079460123`) in production.
+If the representative's Hipcall web phone or softphone client is closed or disconnected from the network:
+- The API still returns HTTP `201 Created` because the dispatch command was queued in the telephony engine.
+- The PBX attempts to reach the agent device; receiving no handshake, it terminates the call session without ever dialing the customer.
+- **Diagnosis:** To determine why a call did not connect, inspect the `call_hangup` webhook payload for `hangup_by: "system"`, or check agent device registration in the dashboard logs.
 
 ## Parameter reference
 

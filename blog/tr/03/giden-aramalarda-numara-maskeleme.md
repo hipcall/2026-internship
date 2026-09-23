@@ -18,9 +18,15 @@ status: review
 
 ## Genel bakış
 
-Saha hizmetleri, pazar yerleri, kurye teslimatları ve insan kaynakları süreçlerinde iki tarafın birbiriyle görüşürken şahsi telefon numaralarını gizli tutması kritik bir gereksinimdir. Örneğin bir teknik servis veya kurye personeli müşteriyi şahsi cep telefonundan aradığında kendi numarası müşteriye görünür; müşteri geri aradığında da çalışanın kişisel cihazına ulaşır. Benzer şekilde müşterinin iletişim bilgileri personelin cihazında kalarak veri güvenliği ve KVKK uyum riskleri oluşturur.
+Saha hizmetleri, pazar yerleri, kurye teslimatları ve insan kaynakları süreçlerinde iki tarafın birbiriyle görüşürken şahsi telefon numaralarını gizli tutması kritik bir güvenlik ve gizlilik gereksinimidir. Bir teknik servis veya kurye personeli müşteriyi şahsi cep telefonundan aradığında kendi numarası müşteriye görünür; müşteri geri aradığında da çalışanın kişisel cihazına doğrudan ulaşır. Benzer şekilde müşterinin telefon numarası personelin kişisel cihazında saklı kalarak kurumsal veri güvenliği ve KVKK uyum riskleri oluşturur.
 
-Hipcall API ile kendi uygulamanız veya CRM sisteminiz üzerinden programatik çağrı başlatabilir (click-to-call) ve numara maskeleme parametreleri sayesinde iki tarafın da kişisel numaralarını görmeden kurumsal santral üzerinden konuşmasını sağlayabilirsiniz.
+Hipcall API, bu süreci kendi uygulamanız veya CRM sisteminiz üzerinden tek bir HTTP POST isteğiyle programatik çağrıya (click-to-call) dönüştürür. Numara maskeleme parametreleri sayesinde iki taraf da kişisel numaralarını görmeden kurumsal santral köprüsü üzerinden görüşür.
+
+Bu rehberde şu mimari adımları uyguluyoruz:
+- CRM uygulamanızdan dış arama başlatma ve santralin varsayılan dış numara mantığını yönetme.
+- `call_masking` ve `call_masking_name` parametreleriyle temsilci ekranında müşteri numarasını gizleyip sipariş bağlamını gösterme.
+- `ring_user_first` parametresiyle çağrı sırasını kontrol ederek temsilci hazır olmadan müşterinin hatta beklemesini engelleme.
+- Asenkron çalışan HTTP 201 yanıtının teknik sınırlarını yönetme ve temsilci çevrimdışı olduğunda çağrı düşmelerini doğru tespit etme.
 
 ## Başlamadan önce
 
@@ -38,7 +44,7 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 
 ## Click-to-call ile çağrı başlatma
 
-Temsilci adına dış arama başlatmanın standart yolu `/users/{user_id}/call` endpoint'ine HTTP POST isteği göndermektir. Aranacak müşteri numarasını uluslararası E.164 formatında (`+90...`) belirtin.
+Numara maskeleme, Hipcall'ın click-to-call altyapısı üzerine inşa edilmiş bir parametredir. Temsilci adına dış arama başlatmanın standart yolu `/users/{user_id}/call` endpoint'ine HTTP POST isteği göndermektir. Aranacak müşteri numarasını uluslararası E.164 formatında (`+90...`) belirtin:
 
 ```bash
 curl -X "POST" "https://use.hipcall.com.tr/api/v3/users/4200/call" \
@@ -79,6 +85,7 @@ curl -X "POST" "https://use.hipcall.com.tr/api/v3/users/4200/call" \
 1. **Varsayılan Davranış:** `number_id` göndermezseniz, temsilcinin Hipcall profilinde tanımlı olan varsayılan dış numara (`default_number`) kullanılır. Kullanıcılar varsayılan numaralarını panelde Ayarlar > Profil altından değiştirebilir.
 2. **Kavram Ayrımı:** `callee_number` aramak istediğiniz hedef kişiyi, `number_id` ise santralin aramayı başlatırken karşı tarafa göstereceği kendi kayıtlı numaranızın ID'sini ifade eder.
 3. **Dahili Aramaları:** `/extensions/{extension_id}/call` endpoint'i üzerinden çağrı başlatırken `number_id` parametresinin iletilmesi zorunludur; `/users/{user_id}/call` endpoint'inde ise isteğe bağlıdır.
+4. **Numara Formatı (E.164):** Hipcall santrali `callee_number` alanındaki boşlukları veya baştaki yerel çıkış kodunu (`0`) otomatik temizleyebilse de, çok lokasyonlu hesaplarda arama karışıklıklarını önlemek için daima tam E.164 formatı (`+90...`) kullanın.
 
 ## Numara maskelemeyi etkinleştirme
 
@@ -197,7 +204,7 @@ Console.WriteLine($"Çağrı kuyruğa alındı. Çağrı ID: {callId}");
 - **Hata gövdesini koruma:** HTTP başarısızlık durumunda istisna fırlatılmadan önce API gövdesi okunarak hata mesajı geliştiriciye eksiksiz aktarılır.
 - **Opsiyonel parametre esnekliği:** Maskeleme ve `number_id` parametreleri isteğe bağlıdır; değer verilmediğinde varsayılan kullanıcı profili ayarları devreye girer.
 
-## API yanıtı ne anlama geliyor?
+## Asenkron çağrı akışı ve HTTP 201 yanıtı
 
 İstek söz dizimi ve yetkilendirme geçerli olduğunda API `201 Created` durum kodu ve bir çağrı UUID'si döndürür:
 
@@ -228,8 +235,8 @@ sequenceDiagram
 
 Bu cevabın teknik sınırlarını doğru yorumlamak gerekir:
 
-- **Ne Söyler:** İstek parametrelerinin doğru olduğunu, kimlik doğrulamasının onaylandığını ve santralin çağrı başlatma talimatını arama kuyruğuna aldığını söyler.
-- **Ne Söylemez:** Müşterinin telefonunun çaldığını, müşterinin çağrıyı yanıtladığını veya ses köprüsünün (bridge) kurulduğunu söylemez. Temsilcinin cihazı kapalı veya uçak modunda olsa dahi API `201 Created` yanıtı döner; ancak santral temsilciye ulaşamadığında çağrı arka planda sessizce düşer.
+- **Doğrulanan durum:** İstek parametrelerinin geçerli olduğunu, kimlik doğrulamasının onaylandığını ve santralin arama talimatını motor kuyruğuna aldığını gösterir.
+- **Garanti edilmeyen durum:** Müşterinin telefonunun çaldığını, müşterinin çağrıyı yanıtladığını veya ses köprüsünün kurulduğunu garanti etmez. Temsilcinin cihazı kapalı veya uçak modunda olsa dahi API `201 Created` yanıtı döner; ancak santral temsilciye ulaşamadığında çağrı arka planda sessizce düşer.
 
 Bu nedenle CRM uygulamanızda bir çağrıyı "bağlandı" olarak işaretlemek için HTTP 201 kodunu baz almayın. Durum takibi için Webhook bildirimlerini dinleyin veya `GET /api/v3/calls` üzerinden `bridged_at` ve `call_duration` alanlarını kontrol edin.
 
@@ -265,11 +272,12 @@ Sistemde karşılığı bulunmayan bir kullanıcı veya dahili ID'si girildiğin
 
 **Çözüm:** `GET /api/v3/users` veya `GET /api/v3/extensions` endpoint'lerini çağırarak ilgili kullanıcının `id` değerini doğrulayın.
 
-### E.164 formatı ve ülke ön eki çözümlemesi
+### Temsilci cihazı çevrimdışı olduğunda (Sessiz çağrı sonlanması)
 
-`callee_number` alanına `+905551112233` yerine sıfırla başlayan yerel bir numara (`05551112233`) veya boşluklu bir değer (`555 111 22 33`) gönderdiğinizde API isteği reddetmez ve `201 Created` yanıtı verir.
-
-Hipcall santrali numaradaki boşlukları ve baştaki yerel çıkış kodunu (`0`) temizler. Numarayı, kullanıcının ve hesabın profilinde yer alan `phone_prefix` (`TR`) ve `locale` (`tr_TR`) ayarlarına göre Türkiye ülke koduyla (`+90`) tamamlayarak yorumlar. Ancak farklı ülke ön eklerine sahip çok lokasyonlu hesaplarda olası yönlendirme karışıklıklarını önlemek için her zaman tam E.164 formatını kullanın.
+Temsilcinin Hipcall web telefonu veya mobil uygulaması kapalıysa ya da internet bağlantısı kesilmişse:
+- API çağrı başlatma talimatını kuyruğa aldığı için yine HTTP `201 Created` yanıtı döner.
+- Santral temsilcinin cihazına sinyal gönderir; yanıt alamadığında müşterinin numarasını hiç aramadan çağrı oturumunu sonlandırır.
+- **Teşhis:** Çağrının neden bağlanmadığını anlamak için Webhook akışındaki `call_hangup` olayında `hangup_by: "system"` değerini kontrol edin veya panelde entegrasyon günlüklerinden temsilci bacağının durumunu inceleyin.
 
 ## Parametre listesi
 
