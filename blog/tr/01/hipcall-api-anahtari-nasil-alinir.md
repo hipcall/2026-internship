@@ -13,45 +13,38 @@ authors: [hipcall-team]
 featured: false
 draft: true
 task: 01
-status: draft
+status: review
 ---
 
 ## Genel bakış
 
-Bu rehberde HipCall API anahtarı oluşturmayı ve profil endpoint'ine kimlik doğrulamalı ilk isteğinizi göndermeyi öğreneceksiniz. Ayrıca başarılı bir cevabın nasıl göründüğünü ve yaygın kimlik doğrulama hatalarını nasıl ele alacağınızı göreceksiniz.
+Hipcall API, bulut santral altyapınızı kurum içi yazılımlarınıza, CRM platformunuza veya özel iş akışlarınıza entegre etmenizi sağlar. API üzerinden çağrı başlatabilir, çağrı kayıtlarını dışarı aktarabilir, müşteri verilerini anlık olarak temsilcinin ekranına taşıyabilir ve gelen aramaları yönetebilirsiniz.
+
+Bu rehberde, Hipcall yönetim panelinden bir API anahtarı (Personal Access Token) oluşturmayı ve `/profile` endpoint'ine ilk kimlik doğrulamalı HTTP isteğinizi göndermeyi uygulayacağız.
 
 ## Başlamadan önce
 
-API anahtarı oluşturmak için **Yönetici** veya **Kurucu** rolüne sahip bir kullanıcı hesabınız olmalıdır. **Standart** ve **Yetkili** rollerine sahip kullanıcılar geliştirici ayarlarına erişemez.
+API anahtarı oluşturabilmek için hesabınızın **Yönetici (Admin)** veya **Kurucu (Founder)** rolüne sahip olması gerekir. Standart kullanıcı hesapları güvenlik gereği geliştirici ayarlarına erişemez.
 
-1. `https://use.hipcall.com.tr/` adresinden HipCall paneline giriş yapın.
-2. **Ayarlar > Geliştirici** menüsünü açın.
-3. **API** bölümünü açın.
-4. Yeni bir API anahtarı oluşturmak için **Yeni** butonuna tıklayın.
-5. **Ad** ve **Son geçerlilik tarihi** alanlarını doldurun. Her iki alan da zorunludur.
-6. API anahtarını oluşturun ve gösterilen gizli anahtarın tamamını güvenli bir yerde saklayın.
+1. `https://use.hipcall.com.tr/` adresinden Hipcall paneline giriş yapın.
+2. Sol menüden **Ayarlar > Geliştirici (Settings > Developer)** sayfasına gidin.
+3. **API** sekmesini seçin.
+4. **Yeni (New)** butonuna tıklayın.
+5. Anahtarınız için açıklayıcı bir **Ad (Name)** girin (Örn: `CRM Entegrasyonu`).
+6. **Son geçerlilik tarihi (Expiration date)** belirleyin. Süre en az 1 gün, en fazla 3 yıl olabilir (varsayılan süre 1 yıldır).
+7. **Oluştur** butonuna tıklayın.
 
-Varsayılan geçerlilik süresi bir yıldır. Son geçerlilik tarihini en fazla üç yıl sonrasına kadar seçebilirsiniz.
-
-API anahtarı oluşturulduktan sonra HipCall gizli anahtarın tamamını ekranda gösterir. Sayfadan ayrılmadan önce anahtarı güvenli bir yerde saklayın. Sayfayı kapattıktan sonra anahtarın tamamını tekrar görüntüleyemezsiniz. API anahtarı listesinde anahtarın maskelenmiş hâli gösterilir.
-
-Anahtarı kaybederseniz mevcut anahtarı silip yeni bir API anahtarı oluşturun.
+Oluşturma işleminin hemen ardından Hipcall gizli anahtarın tamamını ekranda gösterir. Sayfadan ayrılmadan önce bu anahtarı güvenli bir şifre yöneticisine kaydedin. Sayfa kapandıktan sonra anahtarın açık hali bir daha görüntülenemez; panelde güvenlik amacıyla yalnızca maskelenmiş biçimi listelenir.
 
 ## İlk isteğinizi gönderin
 
-API anahtarını doğrudan komutun içine yazmak yerine bir ortam değişkeninde saklayın.
+API anahtarınızı betiklerin içine açık metin olarak gömmek yerine bir çevre değişkeninde saklayın:
 
 ```bash
-export HIPCALL_API_TOKEN="..."
+export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-Türkiye DEMO hesabı için profil endpoint'i aşağıdaki adrestedir:
-
-```text
-https://use.hipcall.com.tr/api/v3/profile
-```
-
-API anahtarını `Authorization` başlığında Bearer token olarak göndererek `GET` isteği oluşturun.
+API kimlik doğrulaması `Authorization: Bearer <token>` başlığı üzerinden çalışır. İlk bağlantıyı test etmek için profil endpoint'ine bir `GET` isteği gönderin:
 
 ```bash
 curl -sS -i \
@@ -59,13 +52,11 @@ curl -sS -i \
   https://use.hipcall.com.tr/api/v3/profile
 ```
 
-Panelde görüntülenen API anahtarını doğrudan kullanabilirsiniz. `SFMyNTY.` ön ekli anahtar biçimi de desteklenir; bu nedenle anahtar üzerinde ek bir dönüşüm yapmanız gerekmez.
-
 ## Başarılı cevap
 
-Geçerli bir API anahtarıyla gönderilen istek `200 OK` cevabı döndürür.
+Geçerli bir anahtarla istek gönderildiğinde API `200 OK` durum kodu döner.
 
-Cevap, `data` nesnesi altında kimliği doğrulanan kullanıcı, izinler, yetenekler, hesap, roller ve abonelik bilgileri gibi alanları içerir.
+Dönen JSON gövdesi, anahtarın ait olduğu kullanıcı profilini, atanmış santral numaralarını, varsayılan Caller ID bilgisini ve hesap kısıtlarını içerir:
 
 ```json
 {
@@ -76,74 +67,53 @@ Cevap, `data` nesnesi altında kimliği doğrulanan kullanıcı, izinler, yetene
       "suspended": false,
       "state": "available",
       "title": null,
-      "email": "ornek@firma.com",
+      "email": "ahmet@example.com",
       "locale": "tr_TR",
       "timezone": "Europe/Istanbul",
-      "created_at": "2026-07-21T10:55:30",
+      "created_at": "2026-07-21T10:55:30Z",
       "full_name": "Ahmet Y.",
       "numbers": [
         {
-          "id": 939,
-          "name": "Sub Manager",
-          "number": "+90850XXXXXXX",
-          "country": "TR"
-        },
-        {
           "id": 938,
-          "name": "Super Manager",
+          "name": "Müşteri Hizmetleri",
           "number": "+90850XXXXXXX",
           "country": "TR"
         }
       ],
       "default_number": {
         "id": 938,
-        "name": "Super Manager",
+        "name": "Müşteri Hizmetleri",
         "number": "+90850XXXXXXX",
         "country": "TR"
       },
       "first_name": "Ahmet",
-      "last_logged_in": "2026-09-15T13:10:07",
       "last_name": "Y.",
-      "phone_countries": [
-        "AR",
-        "TR"
-      ],
-      "phone_prefix": "TR",
-      "avatar_url": null
+      "phone_prefix": "TR"
     },
     "account": {
       "locale": "tr_TR",
       "timezone": "Europe/Istanbul",
-      "created_at": "2026-07-21T10:55:30",
       "contact_center": {
         "b2b": true
       },
       "limits": {
         "max_channel": 5
-      },
-      "slug": null
+      }
     },
     "roles": []
   }
 }
 ```
 
-Yayınlamadan önce kişisel ve hesap bilgilerini maskeleyin.
-
-Cevap başlıklarında rate limit bilgileri de bulunur. Test edilen DEMO ortamında limit **dakikada 60 istek** olarak dönmektedir.
+HTTP yanıt başlıklarında hız sınırı (rate limit) sayaçları da iletilir. Standart ortamlarda kota **dakikada 60 istek** olarak tanımlıdır.
 
 ## Hata aldığınızda
 
-### API anahtarı gönderilmediğinde
+Kimlik doğrulama aşamasında bir sorunla karşılaşırsanız API `401 Unauthorized` durum kodu üretir. Dönen hata mesajı sorunun kaynağını açıklar:
 
-`Authorization` başlığı olmadan gönderilen istek `401 Unauthorized` cevabı döndürür.
+### 1. Authorization başlığı eksik olduğunda
 
-```bash
-curl -sS -i \
-  https://use.hipcall.com.tr/api/v3/profile
-```
-
-Cevap gövdesi:
+İstek gönderirken `Authorization` başlığını eklemezseniz API isteği reddeder:
 
 ```json
 {
@@ -153,17 +123,11 @@ Cevap gövdesi:
 }
 ```
 
-### Geçersiz veya süresi dolmuş API anahtarında
+**Çözüm:** İstek başlıklarınızda `Authorization: Bearer <token>` parametresinin yer aldığından ve token değerinin boş olmadığından emin olun.
 
-Geçersiz veya süresi dolmuş bir API anahtarı da `401 Unauthorized` cevabı döndürür. Ancak cevap gövdesi farklıdır.
+### 2. Anahtar geçersiz veya süresi dolmuş olduğunda
 
-```bash
-curl -sS -i \
-  -H "Authorization: Bearer bu-anahtar-sahte" \
-  https://use.hipcall.com.tr/api/v3/profile
-```
-
-Cevap gövdesi:
+Eski, silinmiş veya süresi bitmiş bir anahtar kullanıldığında dönen yanıt:
 
 ```json
 {
@@ -173,36 +137,24 @@ Cevap gövdesi:
 }
 ```
 
-### API adresi
+**Çözüm:** Panelden anahtarın durumunu ve son geçerlilik tarihini kontrol edin. Gerekiyorsa eski anahtarı silip yeni bir anahtar tanımlayın.
 
-Türkiye DEMO hesaplarında API adresi olarak `https://use.hipcall.com.tr` kullanın.
+## Güvenlik kuralları
 
-Profil endpoint'i:
-
-```text
-https://use.hipcall.com.tr/api/v3/profile
-```
-
-## API anahtarınızı güvenli tutun
-
-API anahtarınızı repository, forum gönderisi, ekran görüntüsü veya blog yazısında paylaşmayın. API anahtarlarını, telefon numaralarını, e-posta adreslerini ve isimleri paylaşmadan önce maskeleyin.
-
-Gizli anahtarın tamamı oluşturulduğu sırada gösterilir ve sayfadan ayrıldıktan sonra tekrar görüntülenemez.
-
-Anahtarınız kaybolursa veya açığa çıkarsa anahtarı silin ve yeni bir API anahtarı oluşturun.
+- API anahtarınızı Git repolarına, kamuya açık kod bloklarına veya istemci taraflı (tarayıcı / mobil) kaynak kodlarına gömmeyin.
+- Servislerinizi yapılandırırken anahtarları Docker Secrets, Kubernetes Secrets veya ortam değişkenleri (`.env`) aracılığıyla iletin.
+- Anahtarın güvenliğinden şüphe duyduğunuz an yönetim panelinden ilgili anahtarı silin; silinen anahtar anında geçersiz hale gelir.
 
 ## Parametre listesi
 
-Profil endpoint'i bir istek gövdesi gerektirmez. Kimlik doğrulama `Authorization` başlığı üzerinden sağlanır.
+Profil endpoint'i herhangi bir sorgu parametresi (query parameter) veya JSON gövdesi gerektirmez:
 
-| Parametre       | Tip    | Zorunlu  | Açıklama                                       |
-| --------------- | ------ | -------- | ---------------------------------------------- |
-| `Authorization` | header | evet     | İsteğin kimlik doğrulaması için kullanılan Bearer token. |
+| Parametre | Konum | Tip | Zorunlu | Açıklama |
+|---|---|---|---|---|
+| `Authorization` | Header | string | Evet | `Bearer <API_TOKEN>` biçiminde kimlik doğrulama anahtarı. |
 
 ## Sonraki adımlar
 
-Diğer endpoint'leri incelemek için [HipCall API Referansı](https://use.hipcall.com/api-docs/) sayfasını ziyaret edin.
-
-Sorular sormak veya entegrasyon deneyiminizi paylaşmak için [HipCall Community](https://community.hipcall.com/) sayfasına gidin.
-
-Canlı API anahtarınızı doğrudan interaktif [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasında da kullanabilirsiniz. Uç noktaları tarayıcınız üzerinden canlı olarak test etmek için "Authorize" butonuna tıklayıp anahtarınızı yapıştırmanız yeterlidir.
+- Tüm endpoint ve şemaları interaktif olarak denemek için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasını ziyaret edin.
+- Entegrasyon geliştirmeye devam etmek için çağrı kayıtlarını listeleme ve filtreleme adımlarına geçin.
+- Sorularınızı ve deneyimlerinizi paylaşmak için [Hipcall Topluluk](https://community.hipcall.com/) forumuna katılın.
