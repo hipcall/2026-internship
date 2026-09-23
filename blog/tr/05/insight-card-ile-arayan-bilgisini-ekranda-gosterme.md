@@ -18,30 +18,38 @@ status: review
 
 ## Genel bakış
 
-Telefon çalmaya başladığında ajanın ekranında beliren tek bilgi yabancı bir telefon numarasıdır. Ajan panik halinde CRM sekmesine geçer, numarayı arama kutusuna yapıştırır ve kayıtları tarar. Bu arama ve bağlam kurma telaşı ortalama on beş saniye sürerken, hattın diğer ucundaki müşteri çoktan "Alo?" demiştir.
+Telefon çalmaya başladığında temsilcinin ekranında beliren tek bilgi yabancı bir telefon numarası olduğunda, temsilci panik halinde CRM sekmesine geçip numarayı arama kutusuna yapıştırır ve kayıtları tarar. Bu arama ve bağlam kurma telaşı ortalama on beş saniye sürerken, hattın diğer ucundaki müşteri çoktan konuşmaya başlamıştır.
 
-Insight Card mimarisi bu on beş saniyelik kör noktayı ortadan kaldırır. Çağrı başladığı milisaniyede müşterinin adı, şirketi, açık bakiye durumu ve hesap yöneticisi doğrudan web telefonunun arayüzünde belirir. Veri kurumun kendi veritabanından veya CRM sisteminden gelir; Hipcall bu veriyi temsilcinin önüne hazır getirir.
+Insight Card mimarisi bu on beş saniyelik kör noktayı ortadan kaldırır. Çağrı başladığı anda müşterinin adı, şirketi, açık bakiye durumu ve hesap yöneticisi doğrudan web telefonunun arayüzünde belirir. Veri kurumun kendi veritabanından veya CRM sisteminden gelir; Hipcall bu veriyi temsilcinin önüne hazır getirerek görüşmenin ilk saniyesinden itibaren kişiselleştirilmiş bir deneyim sunulmasını sağlar.
 
-Bu rehberde bir ASP.NET Core webhook alıcısı kurarak, `call_init` anında telefon numarasını tespit etmeyi, yerel CRM'de sorgulamayı, katı şema kurallarına uygun bir Insight Card oluşturup ajanın ekranına basmayı ve canlı çağrı zamanlama sınırlarını ele alıyoruz.
+Bu rehberde, ASP.NET Core Minimal API kullanarak gelen `call_init` webhook'u ile arayan numarayı yakalamayı, yerel CRM'de müşteri sorgulamayı, Insight Card bileşenlerini oluşturup canlı çağrı oturumuna göndermeyi ve çağrı yaşam döngüsünü adım adım ele alıyoruz.
 
 ## Başlamadan önce
 
 Çalışmaya başlamadan önce şu gereksinimlerin hazır olduğundan emin olun:
 
-- Bilgisayarınızda veya sunucunuzda **.NET 8 SDK** kurulu olmalıdır.
+- Bilgisayarınızda veya sunucunuzda **.NET 8 SDK** kurulu olmalıdır (`dotnet --version` çıktısı `8.0` veya üstü).
 - Webhook bildirimlerini alabilmek için dışarıdan erişilebilir güvenli bir HTTPS uç noktası (yerel geliştirme ortamında test etmek için ngrok veya benzeri bir tünel).
 - Hipcall Yönetim Panelinde oluşturulmuş geçerli bir **API Anahtarı (Personal Access Token)**.
-- Canlı testleri gözlemleyebilmek için tarayıcınızda açık bir **Hipcall Web Telefonu** (temsilci ekranı).
+- Canlı testleri gözlemleyebilmek için tarayıcınızda açık bir **Hipcall Web Telefonu** (temsilci oturumu).
 
-## Kartın anatomisi ve desteklenen satır tipleri
+API anahtarınızı terminal oturumunuzda ortam değişkeni olarak tanımlayın:
 
-Insight Card, dikey olarak sıralanan bilgi satırlarından oluşur. Hipcall santrali kart gövdesinde katı şema doğrulaması uygular; her satır tipi yalnızca kendisine tanımlı alanları barındırabilir.
+```bash
+export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
+```
+
+## Insight Card yapısı ve görsel bileşenler
+
+Insight Card, temsilcinin web telefonu arayüzünde dikey bir bilgi kartı olarak render edilen satırlardan oluşur. Kart tasarımında üç temel bileşen kullanılır:
 
 | Satır Tipi (`type`) | Zorunlu Alanlar | İsteğe Bağlı Alanlar | İşlevi ve Görünümü |
 |---|---|---|---|
-| **`title`** | `type`, `text` | `link` | Kartın en üstündeki ana başlıktır. Link tanımlanırsa sağında dış bağlantı ikonu yer alır. |
-| **`shortText`** | `type`, `text` | `label`, `link`, `ios`, `android` | İki sütunlu temel veri satırıdır. Sol tarafta soluk gri etiket, sağ tarafta koyu renkli değer görünür. |
-| **`user`** | `type`, `label`, `user_id` | - | Hipcall kullanıcı kimliğini paneldeki temsilcinin adıyla eşleştirir. |
+| **`title`** | `type`, `text` | `link` | Kartın en üstündeki ana başlıktır. Link tanımlandığında sağında dış bağlantı ikonu yer alır ve tıklandığında CRM kaydını yeni sekmede açar. |
+| **`shortText`** | `type`, `text` | `label`, `link`, `ios`, `android` | İki sütunlu temel veri satırıdır. Sol tarafta soluk gri etiket, sağ tarafta koyu renkli değer görünür. Şirket, bakiye, segment gibi bilgileri taşır. |
+| **`user`** | `type`, `label`, `user_id` | - | Hipcall kullanıcı kimliğini paneldeki temsilcinin adıyla eşleştirerek hesap yöneticisini ekranda gösterir. |
+
+Ekrana basılacak zengin ve yapılandırılmış bir kart örneği:
 
 ```json
 {
@@ -76,24 +84,13 @@ Insight Card, dikey olarak sıralanan bilgi satırlarından oluşur. Hipcall san
 }
 ```
 
-### Katı şema doğrulaması ve null alan tuzağı
+## Insight Card API'si ile kart oluşturma
 
-Hipcall Insight Card API'si beklenmeyen alanlara karşı son derece hassastır. Örneğin bir `shortText` satırı oluştururken C# modelindeki `user_id` alanı `null` olarak JSON çıktısına basılırsa, API tüm kartı `422 Unprocessable Entity` durum koduyla reddeder:
-
-```text
-HTTP 422 Unprocessable Entity
-shortText type only allows fields: type, text, label, link, android, ios. Invalid fields found: user_id in card item 2
-```
-
-Bu nedenle JSON serileştiricide null değerlerin çıktıda yer almaması garanti altına alınmalıdır.
-
-## İlk kartı elle gönderme
-
-Aktif bir çağrınız devam ederken terminalden curl veya C# HttpClient ile tek seferlik kart basabilirsiniz:
+Aktif bir çağrı oturumuna kart göndermek için `/api/v3/calls/{call_id}/cards` endpoint'ine HTTP POST isteği gönderilir:
 
 ```bash
 curl -X POST "https://use.hipcall.com.tr/api/v3/calls/{call_id}/cards" \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "card": [
@@ -120,9 +117,9 @@ curl -X POST "https://use.hipcall.com.tr/api/v3/calls/{call_id}/cards" \
 
 ![Hipcall Web Telefonunda Insight Card Görünümü](/blog/assets/insight-card-test-page4-1.png)
 
-## call_init webhook'u ile kartı otomatik basma
+## Webhook entegrasyonu ve canlı çağrı yaşam döngüsü
 
-Uçtan uca otomasyonda akış santralin `call_init` bildirimini göndermesiyle başlar.
+Kartın temsilci telefonu açtığı anda ekranda hazır olması için, çağrının başladığı an tetiklenen `call_init` webhook olayı kullanılır:
 
 ```mermaid
 sequenceDiagram
@@ -132,7 +129,7 @@ sequenceDiagram
     participant Receiver as Alıcı (ASP.NET Core)
     participant CRM as CRM Veritabanı
     participant CardAPI as Cards REST API
-    participant UI as Web Telefonu (Ajan)
+    participant UI as Web Telefonu (Temsilci)
 
     Musteri->>PBX: Arama Başlatılır
     PBX->>UI: Çaldırma Sinyali
@@ -140,50 +137,36 @@ sequenceDiagram
     Receiver-->>PBX: 200 OK (< 50 ms)
     
     rect rgb(240, 248, 255)
-        Note over Receiver,CRM: Arka Plan Görevi
+        Note over Receiver,CRM: Arka Plan Asenkron Görevi
         Receiver->>Receiver: Çağrı Yönü Analizi (inbound / outbound)
         Receiver->>CRM: Telefon Numarasını Sorgula
         alt Müşteri Bulundu
             CRM-->>Receiver: Müşteri Profili (Ad, Şirket, Bakiye)
             Receiver->>CardAPI: POST /api/v3/calls/{id}/cards
-            CardAPI-->>UI: Kartı Ajan Ekranına İlet
+            CardAPI-->>UI: Kartı Temsilci Ekranına İlet
             CardAPI-->>Receiver: 201 Created
         else Müşteri Bulunamadı
-            Note over Receiver: İstek Atılmaz (Boş Kart Engeli)
+            Note over Receiver: İstek Gönderilmez (Gereksiz Yük Önleme)
         end
     end
 ```
 
 ### Çağrı yönüne göre numara tespiti
 
-Santralden gelen webhook gövdesinde müşteri numarasının hangi alanda yer aldığı çağrının yönüne (`direction`) bağlıdır:
+Gelen webhook gövdesinde müşteri numarasının konumu çağrının yönüne (`direction`) bağlıdır:
 
-- **Gelen çağrılarda (`inbound`):** Arayan taraf dışarıdaki müşteri olduğu için hedef numara `data.caller_number` alanındadır.
-- **Giden çağrılarda (`outbound`):** Temsilci dışarıyı aradığı için hedef numara `data.callee_number` alanındadır.
+- **Gelen çağrılarda (`inbound`):** Arayan taraf dışarıdaki müşteri olduğu için aranan numara `data.caller_number` alanındadır.
+- **Giden çağrılarda (`outbound`):** Temsilci dışarıyı aradığı için müşteri numarası `data.callee_number` alanındadır.
 
-### Müşteri bulunamadığında boş kart basmama kuralı
+### Müşteri bulunamadığında sessiz tamamlama
 
-Hipcall API'si teknik olarak `{"card": []}` boş dizisini kabul eder. Ancak CRM'de bulunamayan bir numara için boş kart basmak, ajanın karşısına içi boş gri bir panel çıkararak dikkatini dağıtır. Müşteri veri tabanında eşleşmediğinde hiçbir HTTP isteği gönderilmemeli, işlem sessizce tamamlanmalıdır.
+CRM veritabanında eşleşmeyen bir telefon numarası için boş bir kart dizisi (`{"card": []}`) göndermek, temsilcinin ekranında gereksiz gri bir kutu açar. Eşleşme sağlanamadığında hiçbir HTTP isteği gönderilmemeli, arka plan işlemi sessizce sonlandırılmalıdır.
 
-## Zamanlama: Kartın en zor tarafı
+## C# Minimal API ile uçtan uca otomasyon
 
-Insight Card geliştiricilerinin en sık karşılaştığı durum zamanlama bütçesidir.
-
-### 1. Karşı taraf açtığı anda görünme davranışı
-Canlı testlerimizde web telefonunun çaldırma esnasında minimalist arama ekranını koruduğunu, çağrı yanıtlandığı (`answered`) milisaniyede Insight Card bileşenini render ettiğini tespit ettik. Kartı `call_init` anında basmak, karşı taraf telefonu açtığı anda verinin ekranda hazır bulunmasını sağlar.
-
-### 2. Çağrı bittikten sonra kart basılması ve HTTP 200 yanılgısı
-Çağrı sonlandıktan sonra API'ye kart gönderildiğinde sistem HTTP `200/201` döner ve kartı geçmişe kaydeder. Ancak çağrı kapandığı için ajan bu kartı canlı ekranda göremez. API'nin başarılı dönmesi, kartın ajan tarafından görüldüğü anlamına gelmez; kart canlı görüşme anında iletilmelidir.
-
-### 3. Süre bütçesi (Latency Budget)
-Ortalama telefon çalma süresi 5 ila 15 saniyedir. Webhook geliş süresi (150 ms) ve kart POST süresi (200 ms) hesaba katıldığında, CRM sorgunuz 2 saniye sürse bile toplam gecikme yaklaşık 2.4 saniyede kalır ve kart telefon açılmadan önce santralde hazır hale gelir. CRM sorgularının 3 saniyenin altında kalması ideal kullanıcı deneyimini korur.
-
-## Örnek uygulamanın tamamı
-
-Aşağıda gelen `call_init` olayını yakalayan, çağrı yönüne göre numarayı ayıran, yerel `customers.json` CRM veritabanında arama yapan ve arka planda kart basan Minimal API uygulaması yer almaktadır:
+Aşağıdaki ASP.NET Core Minimal API uygulaması, gelen `call_init` webhook'unu 50 ms altında onaylar, arka planda çağrı yönüne göre numarayı belirler, yerel `customers.json` dosyasından müşteriyi bulur ve Insight Card'ı çağrı oturumuna gönderir:
 
 ```csharp
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -214,7 +197,7 @@ var jsonOptions = new JsonSerializerOptions
     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_9a8f2e4c1b0d";
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
 var baseDir = Directory.GetCurrentDirectory();
 var customersFilePath = Path.Combine(baseDir, "customers.json");
 
@@ -224,6 +207,11 @@ app.MapGet("/", () => Results.Ok(new { status = "running", service = "Hipcall.In
 
 app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request, IHttpClientFactory httpClientFactory) =>
 {
+    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    {
+        return Results.Unauthorized();
+    }
+
     using var reader = new StreamReader(request.Body, Encoding.UTF8);
     var rawBody = await reader.ReadToEndAsync();
 
@@ -403,22 +391,40 @@ public class CallDataPayload
 }
 ```
 
-## Hata aldığınızda
+## Hata aldığınızda ve dikkat edilmesi gerekenler
 
-Entegrasyon sırasında karşılaşılabilecek durumlar:
+### 1. HTTP 422 Unprocessable Entity ve katı şema kuralı
 
-### 1. HTTP 422 Unprocessable Entity
-- Satır tiplerini kontrol edin: Yalnızca `title`, `shortText` ve `user` tiplerine izin verilir.
-- Katı şema ihlalini önleyin: `shortText` nesnelerinde `user_id` alanı null dahi olsa yer almamalıdır.
-- Kart gövdesinde `card` dizisinin bulunduğunu teyit edin.
+Hipcall Insight Card API'si satır nesnelerinde tanımlı olmayan yabancı alanlara karşı katı doğrulama uygular. Örneğin `shortText` tipindeki bir satıra C# modelinde tanımlı olan `user_id` alanı `null` olarak dahi serileştirilirse API tüm kartı reddeder:
 
-### 2. Ajan kartı ekranda göremiyor
-- Ajan telefonu kapatmış olabilir: Bitmiş çağrılara kart basıldığında API başarılı dönse de ekranda render gerçekleşmez.
-- `HIPCALL_API_TOKEN` yetkisini doğrulayın: API yetkisiz isteklerde kart oluşturmaz.
-- Süre bütçesini inceleyin: CRM sorgunuz 4 saniyeyi aşıyorsa kart geç kalıyor olabilir.
+```text
+HTTP 422 Unprocessable Entity
+shortText type only allows fields: type, text, label, link, android, ios. Invalid fields found: user_id in card item 2
+```
+
+**Çözüm:** JSON serileştiricide `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` ayarını mutlaka tanımlayın. Bu sayede kullanılmayan alanlar JSON çıktısından tamamen çıkarılır ve şema ihlali engellenir.
+
+### 2. Çağrı kapandıktan sonra kart basılması
+
+Çağrı bittikten sonra API'ye kart gönderildiğinde sistem HTTP `200/201` döner ve kartı çağrı detay geçmişine iliştirir. Ancak çağrı penceresi kapandığı için temsilci bu kartı canlı ekranda göremez. API'nin başarılı dönmesi kartın temsilci tarafından görüldüğü anlamına gelmez; kart canlı görüşme devam ederken iletilmelidir.
+
+### 3. Zamanlama bütçesi (Latency Budget)
+
+Telefon çalma süresi genellikle 5 ila 15 saniyedir. Webhook iletimi (~150 ms) ve kart POST isteği (~200 ms) hesaba katıldığında, CRM sorgunuz 2 saniye sürse bile toplam gecikme yaklaşık 2.4 saniyede kalır ve kart telefon açılmadan önce santralde hazır hale gelir. Ancak CRM sorgularının 3-4 saniyeyi aşması kartın görüşme başladıktan sonra ekrana gelmesine yol açabilir; bu nedenle müşteri sorgularının hızlı çalışması kritik önem taşır.
+
+## Parametre listesi
+
+Insight Card satır tipleri ve desteklenen alanlar:
+
+| Satır Tipi | Desteklenen Alanlar | Açıklama |
+|---|---|---|
+| `title` | `type`, `text`, `link` | Kart başlığı ve tıklandığında açılacak CRM bağlantısı. |
+| `shortText` | `type`, `text`, `label`, `link`, `ios`, `android` | Etiket-değer ikilisi, harici web bağlantısı veya mobil deep link. |
+| `user` | `type`, `label`, `user_id` | Hipcall kullanıcı ID'si üzerinden hesap yöneticisi gösterimi. |
 
 ## Sonraki adımlar
 
 - Çok sayıda müşteri kaydı için JSON dosyası yerine Redis önbelleği veya PostgreSQL indeksli arama altyapısına geçin.
 - Kendi CRM'inizde bulunmayan numaralar için Hipcall'ın `GET /api/v3/lookup/by_phone` rehber sorgusunu ikincil kaynak (fallback) olarak devreye alın.
 - Mobil temsilciler için `ios` ve `android` deep link parametrelerini tanımlayarak tek dokunuşla yerel CRM uygulamasının açılmasını sağlayın.
+- Entegrasyon deneyimlerinizi veya Insight Card tasarımlarınızı [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.
