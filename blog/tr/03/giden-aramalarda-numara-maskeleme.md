@@ -53,10 +53,10 @@ curl -X "POST" "https://use.hipcall.com.tr/api/v3/users/4200/call" \
 
 ### Çağrı sırasını yönetme (ring_user_first)
 
-`ring_user_first` parametresi santralin çağrıyı başlatma mantığını kontrol eder:
+`ring_user_first` zorunlu bir boolean parametredir ve santralin çağrıyı başlatma sırasını kontrol eder:
 
 - **`true` (Önerilen):** Önce temsilcinin Hipcall uygulaması çalar. Temsilci çağrıyı yanıtladığı anda santral müşterinin telefonunu aramaya başlar. Bu yöntem, temsilci hatta hazır olmadan müşterinin telefonu açıp boş hatta beklemesini engeller.
-- **`false` (Varsayılan):** Santral temsilcinin cihazını çaldırmadan doğrudan müşterinin numarasını aramaya başlar ve temsilciyi hazır kabul eder. Temsilcinin internet bağlantısı kopmuşsa çağrı şebekede sessizce düşer.
+- **`false`:** Santral temsilcinin cihazını çaldırmadan doğrudan müşterinin numarasını aramaya başlar ve temsilciyi hazır kabul eder. Temsilcinin internet bağlantısı kopmuşsa çağrı şebekede sessizce düşer.
 
 ### Arayan kurumsal numarayı belirleme (number_id)
 
@@ -237,17 +237,19 @@ Bu nedenle CRM uygulamanızda bir çağrıyı "bağlandı" olarak işaretlemek i
 
 ### 422 Unprocessable Entity
 
-Zorunlu alanlar eksik olduğunda döner. Örneğin `callee_number` gönderilmediğinde:
+Zorunlu alanlar eksik olduğunda döner. Örneğin zorunlu olan `ring_user_first` parametresi gönderilmediğinde:
 
 ```json
 {
   "errors": {
-    "callee_number": ["can't be blank"]
+    "ring_user_first": [
+      "can't be blank"
+    ]
   }
 }
 ```
 
-**Çözüm:** İstek gövdesine `callee_number` alanını geçerli bir telefon numarasıyla ekleyin.
+**Çözüm:** İstek gövdesinde `callee_number` ve `ring_user_first` (`true` veya `false`) zorunlu alanlarının eksiksiz iletildiğinden emin olun.
 
 ### 404 Not Found
 
@@ -274,7 +276,7 @@ Hipcall santrali numaradaki boşlukları ve baştaki yerel çıkış kodunu (`0`
 | Parametre | Tip | Zorunlu | Açıklama |
 |---|---|---|---|
 | `callee_number` | string | evet | E.164 formatında hedef telefon numarası (ör. `+90530XXXXXXX`). |
-| `ring_user_first` | boolean | hayır | Önce temsilcinin cihazını çaldırır. Varsayılan `false`. |
+| `ring_user_first` | boolean | evet | Önce temsilcinin cihazını çaldırır (`true` önerilir) veya doğrudan müşteriyi arar (`false`). Zorunlu alandır. |
 | `number_id` | integer | hayır | Müşteriye gösterilecek kayıtlı kurumsal dış numara ID'si. Belirtilmezse kullanıcının varsayılan numarası kullanılır. |
 | `call_masking` | boolean | hayır | Aranan müşteri numarasını temsilci ekranında `0000000000` olarak gizler. |
 | `call_masking_name` | string | hayır | Temsilci ekranındaki sıfırların yerine gösterilecek bağlam etiketi (en fazla 30 karakter). |

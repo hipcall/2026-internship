@@ -53,10 +53,10 @@ curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
 
 ### Controlling the call sequence (ring_user_first)
 
-The `ring_user_first` parameter determines which side rings first:
+The `ring_user_first` parameter is a mandatory boolean that determines which side rings first:
 
 - **`true` (Recommended):** Hipcall rings the agent's application first. As soon as the agent answers, the PBX dials the customer. This sequence ensures the customer is not connected to a silent line before an agent is ready.
-- **`false` (Default):** The PBX attempts to dial the customer immediately while simultaneously connecting the agent. If the agent is unavailable or offline, the call drops without connection.
+- **`false`:** The PBX attempts to dial the customer immediately while simultaneously connecting the agent. If the agent is unavailable or offline, the call drops without connection.
 
 ### Choosing your outbound caller ID (number_id)
 
@@ -237,17 +237,19 @@ Do not mark calls as "connected" or "completed" in your CRM based solely on a `2
 
 ### 422 Unprocessable Entity
 
-Returned when mandatory fields are omitted. For example, omitting `callee_number`:
+Returned when mandatory fields are omitted. For example, omitting the required `ring_user_first` field:
 
 ```json
 {
   "errors": {
-    "callee_number": ["can't be blank"]
+    "ring_user_first": [
+      "can't be blank"
+    ]
   }
 }
 ```
 
-**Fix:** Provide a valid `callee_number` in your JSON request body.
+**Fix:** Ensure both mandatory fields, `callee_number` and `ring_user_first` (`true` or `false`), are present in your JSON payload.
 
 ### 404 Not Found
 
@@ -274,7 +276,7 @@ The Hipcall PBX strips whitespaces and national trunk zeros. It resolves the num
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `callee_number` | string | yes | Recipient phone number in E.164 format (e.g., `+442079460123`). |
-| `ring_user_first` | boolean | no | Rings the agent before dialing the recipient. Default is `false`. |
+| `ring_user_first` | boolean | yes | Rings the agent before dialing the recipient (`true`) or dials recipient directly (`false`). Mandatory field. |
 | `number_id` | integer | no | ID of the registered outbound number displayed to the recipient. If omitted, uses the agent's default number. |
 | `call_masking` | boolean | no | Masks the recipient number as `0000000000` on the agent's screen. |
 | `call_masking_name` | string | no | Replaces the zeros with a custom label on the agent's screen (max 30 chars). |
