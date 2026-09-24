@@ -18,41 +18,40 @@ status: review
 
 ## Genel bakış
 
-Çağrı kayıtlarını veri ambarınıza, CRM yazılımınıza veya muhasebe sisteminize aktarırken liste endpoint'lerini periyodik olarak sorgulamak (polling), hem API kota sınırlarını tüketir hem de çağrı verilerinin sisteminize onlarca saniye gecikmeyle ulaşmasına neden olur.
+Çağrı kayıtlarını API üzerinden periyodik olarak çekmek (polling) kota tüketir ve veriyi gecikmeli almanıza neden olur.
 
-Webhook mimarisi bu süreci anlık ve verimli hale getirir. Bir çağrı başladığında, temsilciye bağlandığında veya sonlandığında Hipcall santrali doğrudan uygulamanıza bir HTTP POST isteği gönderir. Böylece çağrı bittiği milisaniyede görüşme süresi, sonlanma nedeni ve ses kaydı bağlantısı sisteminize gecikmesiz akar.
+Webhook'lar olayları uygulamanıza anında iletir. Bir çağrı başladığında, bağlandığında veya bittiğinde Hipcall santrali uygulamanıza bir HTTP POST gönderir. Çağrı bittiği an görüşme süresi ve ses kaydı bağlantısı doğrudan veritabanınıza ulaşır.
 
-Üretim ortamında kesintisiz çalışan bir webhook altyapısı kurmak birkaç temel mühendislik adımını bir araya getirmeyi gerektirir:
-- Santral dağıtıcısını bekletmemek için **50 milisaniyenin altında hızlı yanıt vermek** ve ağır işleri (ses kaydı indirme, veritabanı yazma) arka plana devretmek.
-- İmzalanmamış webhook uç noktalarını **gizli URL rota anahtarı** ile güvenceye almak.
-- Ağ dalgalanmalarına karşı kayıtları **UUID ile tekilleştirmek (idempotency)**.
-- Canlı webhook akışını, olası ağ kesintilerine karşı **gece mutabakat servisi** ile destekleyerek sıfır veri kaybı garantisi sağlamak.
+Üretim ortamına hazır bir webhook alıcısının dört görevi vardır:
+- Zaman aşımını önlemek için 50 milisaniyenin altında HTTP 200 dönmek.
+- Uç noktayı gizli bir rota anahtarıyla korumak.
+- Ağ tekrarlarında veriyi UUID ile tekilleştirmek.
+- Sunucu kesintilerini telafi etmek için gece mutabakatı yapmak.
 
-Bu rehberde, Hipcall panelinde webhook yapılandırmayı, bu mimari ilkeleri uygulayan güvenilir bir ASP.NET Core Minimal API alıcısı kurmayı ve ses dosyalarını asenkron arşivlemeyi adım adım uyguluyoruz.
+Bu sayfada Hipcall panelinde webhook ayarlamayı, ASP.NET Core Minimal API ile bir alıcı yazmayı ve ses dosyalarını arka planda indirmeyi anlatıyoruz.
 
 ## Başlamadan önce
 
-Çalışmaya başlamadan önce şu gereksinimleri hazırlayın:
-
-- Bilgisayarınızda veya sunucunuzda **.NET 8 SDK** kurulu olmalıdır (`dotnet --version` çıktısı `8.0` veya üstü).
-- **Dışarıdan erişilebilir bir HTTPS adresi.** Yerel geliştirme ortamında test yapabilmek için [ngrok](https://ngrok.com/) aracılığıyla 5080 portunu dış dünyaya açın:
+Şunlara ihtiyacınız var:
+- .NET 8 SDK (`dotnet --version` 8.0 veya üstü olmalı).
+- Dışarıdan erişilebilir bir HTTPS adresi. Yerel ortamda port 5080'i dışarı açmak için ngrok kullanın:
   ```bash
   ngrok http 5080
   ```
-- Hipcall panelinde entegrasyon ekleme yetkisine sahip bir hesap.
-- Test aramaları yapabilmek için çevrim içi durumda olan **kayıtlı bir temsilci cihazı** (Hipcall web telefonu veya masaüstü uygulaması).
+- Hipcall panelinde entegrasyon ekleme yetkisi.
+- Test için çevrimiçi bir Hipcall uygulaması (web veya masaüstü).
 
 ## Webhook kurulumu
 
-Webhook entegrasyonunu Hipcall yönetim panelinde oluşturun:
+Webhook'u Hipcall panelinden oluşturun:
 
-1. **Ayarlar > Entegrasyonlar > Kataloğa Göz At** sayfasına gidin.
-2. Entegrasyon kataloğundan **Web kancası (Webhook)** seçeneğini belirleyin.
-3. Gerekli alanları doldurun:
-   - **Ad (Zorunlu):** Entegrasyon için tanımlayıcı bir isim girin (Örn: `Çağrı Kaydı Alıcısı`).
-   - **URL (Zorunlu):** Gizli yol parçasını içeren genel HTTPS adresinizi yazın: `https://your-server.example.com/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx`.
-   - **Olaylar:** Abone olmak istediğiniz çağrı olaylarını seçin: `call_init`, `call_bridged` ve `call_hangup`.
-4. **Kayıtlar** sekmesini açın. Webhook isteklerinin loglanması **Hata Ayıklama Modu** ile yönetilir. Geliştirme esnasında açıldığında, sistem iki saat boyunca gelen istek gövdelerini ve HTTP yanıt kodlarını kaydeder; ardından log tutmayı otomatik kapatıp günlükleri temizler.
+1. Ayarlar > Entegrasyonlar > Kataloğa Göz At bölümüne gidin.
+2. Web kancası (Webhook) seçeneğine tıklayın.
+3. Detayları girin:
+   - Ad: `Üretim CDR Alıcısı` gibi bir isim verin.
+   - URL: İçinde gizli bir yol bulunan HTTPS adresinizi yazın: `https://your-server.example.com/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx`.
+   - Olaylar: `call_init`, `call_bridged` ve `call_hangup` seçeneklerini işaretleyin.
+4. Kayıtlar sekmesini açın. Hata Ayıklama Modu'nu etkinleştirdiğinizde sistem iki saat boyunca istek gövdelerini ve HTTP yanıtlarını loglar.
 
 ## İlk olayı alma
 
@@ -63,7 +62,7 @@ dotnet new web -n Hipcall.WebhookReceiver
 cd Hipcall.WebhookReceiver
 ```
 
-Panelde tanımladığımız gizli anahtarı doğrulayan ve gelen gövdeyi konsola yazdıran temel bir alıcıyla başlayın:
+Gizli anahtarı doğrulayan ve gövdeyi yazdıran bir alıcı hazırlayın:
 
 ```csharp
 using System.Text;
@@ -95,11 +94,11 @@ app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest requ
 app.Run();
 ```
 
-Uygulamayı `dotnet run` komutuyla başlatın ve panelden veya telefonunuzdan bir test araması gerçekleştirin.
+Uygulamayı `dotnet run` ile çalıştırıp bir test araması yapın.
 
 ### Gövde yapısı
 
-Hipcall istekleri `Content-Type: application/json` başlığıyla gönderir. Tüm olaylar iki anahtarlı standart bir zarf yapısı taşır:
+Hipcall, istekleri `application/json` olarak gönderir:
 
 ```json
 {
@@ -122,7 +121,7 @@ Hipcall istekleri `Content-Type: application/json` başlığıyla gönderir. Tü
 
 ### İstek başlıklarının incelenmesi
 
-Gelen HTTP başlıkları incelendiğinde şu yapı görülür:
+Gelen HTTP başlıkları şu şekildedir:
 
 ```http
 Host: your-server.example.com
@@ -133,31 +132,31 @@ X-Forwarded-For: 31.192.211.2
 X-Forwarded-Proto: https
 ```
 
-Gelen başlıklarda `X-Signature` veya `X-Hub-Signature` gibi bir HMAC imza başlığı yer almaz. Güvenlik, URL içindeki gizli anahtar ve IP filtreleme ile sağlanır.
+Hipcall webhook istekleri `X-Signature` gibi HMAC imza başlıkları içermez.
 
 ## Olayların taşıdığı veriler
 
-Tek bir çağrı oturumu yaşam döngüsü boyunca üç temel webhook olayı tetikler:
+Tek bir çağrı birden fazla olay tetikler.
 
 | Olay | Tetiklenme Anı | Öne Çıkan Alanlar | Kullanım Amacı |
 |---|---|---|---|
-| `call_init` | Santralde çağrı oturumu başladığında | `uuid`, `direction`, `caller_number`, `started_at` | Çağrı başlangıcını tespit etme ve CRM eşleştirmesi yapma. |
-| `call_bridged` | Temsilci santral köprüsüne bağlandığında | `uuid`, `direction`, `user_id`, `call_flow` | Temsilci bacağının bağlandığını teyit etme. |
-| `call_hangup` | Çağrı taraflardan biri tarafından kapatıldığında | `uuid`, `call_duration`, `hangup_by`, `record_url` | Muhasebeleştirme ve kalıcı ses arşivi oluşturma. |
+| `call_init` | Santralde çağrı başladığında | `uuid`, `direction`, `caller_number`, `started_at` | Oturum başlangıcını tespit etme. |
+| `call_bridged` | Temsilci bağlandığında | `uuid`, `direction`, `user_id`, `call_flow` | Temsilcinin katıldığını doğrulama. |
+| `call_hangup` | Çağrı kapandığında | `uuid`, `call_duration`, `hangup_by`, `record_url` | Görüşme özeti ve ses arşivi oluşturma. |
 
 ### Tıklayıp arama (Click-to-Call) akışı
 
-API veya panel üzerinden click-to-call ile arama başlatıldığında Hipcall web telefonu temsilci bacağını otomatik yanıtlar. Temsilci anında santral köprüsüne bağlandığı için, karşı tarafın telefonu henüz çalarken `call_init` ve `call_bridged` olayları 1-2 saniye arayla peş peşe ulaşır.
+API üzerinden arama başlatıldığında Hipcall telefonu temsilciyi otomatik yanıtlar. Temsilci hemen santrale bağlandığı için, müşteri tarafı çalarken `call_init` ve `call_bridged` olayları peş peşe ulaşır.
 
-### Ses kaydı bağlantısı ve kalıcı depolama
+### Ses kaydı bağlantısı
 
-`call_hangup` olayında dönen `data.record_url` alanı, AWS S3 üzerinde barındırılan geçici imzalı bir Presigned URL'dir (`X-Amz-Expires=604800` parametresi ile 7 gün geçerlidir).
+`call_hangup` olayındaki `data.record_url`, 7 gün geçerli geçici bir AWS S3 bağlantısıdır (`X-Amz-Expires=604800`).
 
-Kurumsal sistemlerde kalıcı ve kesintisiz bir ses arşivi oluşturmanın en doğru yolu, bu geçici bağlantıyı olduğu gibi veritabanına yazmak yerine, webhook geldiği anda ses dosyasını asenkron bir arka plan göreviyle indirip kurumun kendi kalıcı depolama alanına (yerel disk, özel S3 kovası vb.) kaydetmektir.
+Ses dosyasını webhook geldiği anda arka planda indirin ve kurumunuzun kendi depolama alanına kaydedin. Geçici bağlantıyı veritabanına yazıp bırakmayın.
 
 ## Güvenilir mimari tasarımı
 
-Üretim seviyesinde bir webhook alıcısı kurarken dört temel tasarım kuralı uygulanır:
+Üretim ortamı için şu dört ilkeyi uygulayın:
 
 ```mermaid
 flowchart TD
@@ -185,44 +184,44 @@ flowchart TD
 
 ### 1. Hızlı cevap verin, ağır işleri arka plana devredin
 
-Hipcall alıcıdan yanıtı en fazla 15 saniye içinde bekler. Alıcı HTTP isteğini bekletip ses kaydı indirmeye veya veritabanı kilitlerine girdiğinde bağlantı zaman aşımına uğrayabilir.
+Hipcall yanıtı 15 saniye içinde bekler. Alıcı ses kaydı indirmek için beklerse bağlantı zaman aşımına uğrar.
 
-En sağlıklı işlem sırası:
-1. Gizli anahtar doğrulamasını gerçekleştirin (yaklaşık 1 ms).
+İşlem sırası:
+1. Gizli anahtarı doğrulayın (1 ms).
 2. JSON gövdesini çözün.
-3. Veriyi belleğe veya iş kuyruğuna alın.
-4. **Anında HTTP `200 OK` cevabı dönün** (< 50 ms).
-5. Dosya yazma ve ses indirme işlemlerini arka plan görevinde tamamlayın.
+3. Veriyi kuyruğa alın.
+4. Anında HTTP 200 OK dönün (50 ms altı).
+5. Ses indirme ve dosyaya yazma işlemini arka planda yapın.
 
 ### 2. Tekilleştirme (Idempotency)
 
-Ağ dalgalanmaları veya servis güncellemeleri nedeniyle aynı çağrı oturumunun birden fazla kez iletilmesi durumunda veri kirliliğini önlemek için:
-- Tekilleştirme anahtarı olarak daima değişmez olan `data.uuid` alanını kullanın.
-- Birden fazla çağrı aynı saniyede başlayabileceği için asla zaman damgası veya telefon numarası üzerinden tekilleştirme yapmayın.
-- Var olan kaydı güncelleme (upsert) yaklaşımını uygulayın.
+Ağ sorunları aynı çağrı olayını tekrar gönderebilir. Veri kirliliğini önlemek için:
+- Tekilleştirme anahtarı olarak sadece `data.uuid` kullanın.
+- Zaman damgası veya telefon numarası üzerinden tekilleştirme yapmayın.
+- Gelen kayıtlarla mevcut kaydı güncelleyin (upsert).
 
-### 3. Gece mutabakatı (Reconciliation)
+### 3. Gece mutabakatı
 
-Yalnızca webhook dinleyen bir sistem, sunucu yeniden başlatmaları veya ağ kesintileri nedeniyle zaman içinde küçük veri kaçakları yaşayabilir.
+Yalnızca webhook kullanan bir sistemde sunucu yeniden başlatmaları sırasında veri kaçabilir.
 
-Eksiksiz arşiv garantisi sağlamak için:
-- Her gece çalışan zamanlanmış bir arka plan görevi (Windows Görev Zamanlayıcısı veya cron) kurun.
-- Günün çağrılarını çekmek için Hipcall REST API'sine istek atın:
+Eksiksiz bir arşiv için:
+- Her gece çalışan bir görev oluşturun.
+- API'den günün çağrılarını çekin:
   ```http
-  GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&sort=started_at.asc&limit=100
+  GET /api/v3/calls?started_at[gte]=...&started_at[lte]=...&limit=100
   ```
-- API'den gelen UUID listesi ile yerel veritabanınızdaki UUID listesini karşılaştırarak küme farkını alın.
-- Eksik kalan çağrıları ve ses kayıtlarını API üzerinden indirip arşivi kuruşu kuruşuna eşitleyin.
+- API'deki UUID'ler ile kendi veritabanınızı karşılaştırın.
+- Eksik çağrıları ve ses kayıtlarını API üzerinden tamamlayın.
 
 ### 4. İmzasız uç noktaları koruma
 
-HMAC imza başlığı bulunmadığı için alıcı adresinizi iki yöntemle koruyun:
-1. **Gizli URL yolu:** URL rotasına tahmin edilemez bir anahtar yerleştirin (`/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx`) ve bu anahtarı taşımayan tüm istekleri doğrudan HTTP `401 Unauthorized` ile reddedin.
-2. **IP beyaz listesi:** Güvenlik duvarınızda (Nginx veya Cloudflare) gelen istekleri yalnızca Hipcall santralinin çıkış IP adresine (`31.192.211.2`) izin verecek şekilde sınırlandırın.
+HMAC başlığı olmadığı için alıcı adresinizi korumanız gerekir:
+1. Gizli URL yolu: URL'nizde gizli bir anahtar bulundurun (`/hipcall/events/whsec_live_...`). Anahtar yoksa HTTP 401 Unauthorized dönün.
+2. IP beyaz listesi: Güvenlik duvarınızda (Nginx, Cloudflare) sadece Hipcall çıkış IP adresine (`31.192.211.2`) izin verin.
 
 ## Örnek uygulamanın tamamı
 
-Aşağıda snake_case model eşlemesi, gizli anahtar doğrulaması, tanınmayan olay toleransı, tekilleştirilmiş dosya kaydı ve asenkron ses indirme özelliklerini içeren eksiksiz ASP.NET Core Minimal API kodu yer almaktadır:
+Bu ASP.NET Core Minimal API kodu gizli anahtar doğrulaması, tekilleştirilmiş dosya kaydı ve arka planda ses indirme içerir.
 
 ```csharp
 using System.Text;
@@ -434,46 +433,47 @@ public class CallRecord
 
 ## Hata aldığınızda
 
-Hipcall webhook altyapısındaki hata durumlarını tanımak beklenmeyen kesintilerin önüne geçer:
+### 1. HTTP 500 yanıtı
 
-### 1. HTTP 500 yanıtı ve tek gönderimli model
-Sunucunuz iç hata verip `500 Internal Server Error` döndürdüğünde:
-- Telefon görüşmesi kesintiye uğramaz; santraldeki arama akışı ile webhook dağıtımı birbirinden bağımsızdır.
-- Hipcall entegrasyon kayıtlarına `500` yazar.
-- Hipcall başarısız istekleri otomatik tekrar denemez (at-most-once iletim modeli). Bu nedenle alıcınızda gelen yükü kuyruğa aldıktan hemen sonra 200 dönmek ve kaçan kayıtları gece mutabakat servisiyle tamamlamak esastır.
+Sunucunuz `500 Internal Server Error` döndürdüğünde:
+- Telefon görüşmesi etkilenmez. Webhook dağıtımı ile telefon trafiği bağımsızdır.
+- Hipcall hatayı loglara yazar.
+- Hipcall istekleri tekrar denemez (at-most-once). Bu yüzden 200 dönmek ve kaçan kayıtları gece tamamlamak zorunludur.
 
-### 2. Zaman aşımı durumu
-Alıcınızın yanıt süresi 15 saniyeyi aştığında Hipcall TCP bağlantısını sonlandırır ve olayı başarısız kabul ederek düşürür.
+### 2. Zaman aşımı
 
-### 3. Başarısız yanıtlar ve "Kırık" durumu
-Alıcınız 1 saat içinde 4 kez 200 dışı başarısız yanıt döndüğünde ya da 15 saniyelik zaman aşımına uğradığında:
-- Hipcall santral kaynaklarını korumak amacıyla entegrasyon durumunu otomatik olarak **Kırık** durumuna getirir.
-- Durum Kırık olduğunda, siz onu panelden tekrar Aktif konuma getirene kadar santral yeni webhook istekleri göndermez.
-- **Eski hâline döndürme:** Panelde entegrasyonu açın, **Düzenle** butonuna tıklayın, durum anahtarını tekrar **Aktif** yapıp **Kaydet** butonuna basın.
+Alıcınız 15 saniyeden geç yanıt verirse Hipcall bağlantıyı keser ve olayı başarısız sayar.
 
-Ayrıntılı yapılandırma ve güncel rehberler için Hipcall'ın resmi [Webkancaları nelerdir ve nasıl ayarlanır?](https://yardim.hipcall.com/gelistirme-araclari/webkancalari-nelerdir-ve-nasil-ayarlanir/) dokümanına göz atabilirsiniz. Bu rehberdeki kurallar Hipcall Webkancaları v1 altyapısını kapsamaktadır; ilerleyen dönemde [Standard Webhooks](https://www.standardwebhooks.com/) standardına uygun v2 sürümü geliştirilecektir.
+### 3. Kırık durumu
+
+Alıcınız bir saat içinde 4 kez başarısız yanıt (200 dışı kod veya 15 saniye zaman aşımı) verirse:
+- Hipcall entegrasyonu Kırık (Broken) duruma alır.
+- Siz tekrar Aktif konuma getirene kadar yeni webhook göndermez.
+- Düzeltmek için paneli açın, durumu Aktif yapıp kaydedin.
+
+Daha fazla bilgi için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasına bakın.
 
 ## Parametre listesi
 
-Çağrı olaylarında `data` nesnesi içinde iletilen temel alanlar:
+Çağrı olaylarında `data` içindeki temel alanlar:
 
 | Parametre | Tip | Örnek | Açıklama |
 |---|---|---|---|
-| `uuid` | string | `"9a266251-d2a3-44fc-b422-9486ddf880c7"` | Çağrının sistem genelindeki tekil kimliği. |
-| `direction` | string | `"outbound"` | Çağrı yönü (`"inbound"` veya `"outbound"`). |
-| `caller_number` | string | `"+90850XXXXXXX"` | Arayan tarafın numarası (E.164 formatında). |
-| `callee_number` | string | `"+90530XXXXXXX"` | Aranan hedef numara (E.164 formatında). |
-| `call_duration` | integer | `14` | Toplam konuşma süresi (saniye cinsinden). |
-| `missing_call` | boolean | `false` | Gelen yanıtsız çağrılarda `true`. |
-| `hangup_by` | string | `"contact"` | Çağrıyı sonlandıran taraf (`"user"`, `"contact"`, `"system"`). |
+| `uuid` | string | `"9a266251-d2a3-44fc-b422-9486ddf880c7"` | Çağrının tekil kimliği. |
+| `direction` | string | `"outbound"` | `"inbound"` veya `"outbound"`. |
+| `caller_number` | string | `"+90850XXXXXXX"` | Arayan numara. |
+| `callee_number` | string | `"+90530XXXXXXX"` | Aranan numara. |
+| `call_duration` | integer | `14` | Toplam konuşma süresi (saniye). |
+| `missing_call` | boolean | `false` | Yanıtsız gelen çağrılarda `true`. |
+| `hangup_by` | string | `"contact"` | Kapatan taraf (`"user"`, `"contact"`, `"system"`). |
 | `record_url` | string/null | `"https://storage.hipcall.com.tr/..."` | AWS S3 ses indirme bağlantısı. |
-| `started_at` | string | `"2026-09-21T10:37:07Z"` | Çağrının santralde başladığı an (UTC). |
-| `answered_at` | string/null | `"2026-09-21T10:37:07Z"` | Çağrının yanıtlandığı an (UTC). |
-| `ended_at` | string/null | `"2026-09-21T10:37:21Z"` | Çağrının kapandığı an (UTC). |
+| `started_at` | string | `"2026-09-21T10:37:07Z"` | Çağrının başlama anı (UTC). |
+| `answered_at` | string/null | `"2026-09-21T10:37:07Z"` | Çağrının yanıtlanma anı (UTC). |
+| `ended_at` | string/null | `"2026-09-21T10:37:21Z"` | Çağrının kapanma anı (UTC). |
 
 ## Sonraki adımlar
 
-- Ani çağrı yoğunluklarında HTTP alıcısı ile veritabanı arasına RabbitMQ veya Redis Streams gibi bir mesaj kuyruğu yerleştirin.
-- Dosya tabanlı `calls.json` yapısından PostgreSQL veya SQL Server veritabanına geçin ve `uuid` kolonuna `UNIQUE` indeks ekleyin.
-- Hipcall'ın `GET /api/v3/calls` REST API'sini kullanan gece mutabakat servisini Windows Görev Zamanlayıcısı'na (Task Scheduler) bağlayarak sıfır veri kaybını garanti altına alın.
-- Entegrasyon sorularınızı veya webhook mimarisi deneyimlerinizi [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.
+- HTTP alıcısı ile veritabanı arasına RabbitMQ ekleyin.
+- `calls.json` yerine `uuid` kolonu eşsiz olan bir PostgreSQL veritabanına geçin.
+- Gece mutabakatını `GET /api/v3/calls` ile otomatikleştirin.
+- Sorularınızı [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.

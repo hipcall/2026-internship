@@ -1,6 +1,6 @@
 ---
 title: "Hipcall API anahtarı nasıl alınır ve ilk istek nasıl gönderilir?"
-description: "Panelden API anahtarı oluşturun, kimlik doğrulamalı ilk isteğinizi gönderin ve dönen cevabı inceleyin."
+description: "Hipcall panelinden API anahtarı oluşturun, ilk isteğinizi gönderin ve dönen yanıtı okuyun."
 slug: hipcall-api-anahtari-nasil-alinir
 lang: tr
 locales: [en, tr]
@@ -16,39 +16,35 @@ task: 01
 status: review
 ---
 
-## Genel bakış
+## Bu rehberde ne var?
 
-Hipcall API, bulut santral altyapınızı kurum içi yazılımlarınıza, CRM platformunuza veya özel iş akışlarınıza entegre etmenizi sağlar. API üzerinden programatik çağrı başlatabilir, çağrı kayıtlarını dışarı aktarabilir, müşteri verilerini anlık olarak temsilcinin ekranına taşıyabilir ve santral yönlendirmelerini yönetebilirsiniz.
+Hipcall API, bulut santral sisteminizi kendi yazılımınıza bağlamanızı sağlar. API üzerinden çağrı başlatabilir, çağrı kayıtlarını çekebilir, arayan bilgisini temsilcinin ekranına iletebilir ya da çağrı yönlendirmelerini değiştirebilirsiniz.
 
-Bu rehberde şu temel adımları uyguluyoruz:
-- Yönetim panelinde uygun yetki ve geçerlilik süresiyle bir API anahtarı (Personal Access Token) oluşturma.
-- API anahtarını çevre değişkenlerinde güvenli şekilde saklama ve `Authorization: Bearer` başlığıyla ilk isteği gönderme.
-- `/profile` endpoint'inden dönen kullanıcı, santral numaraları ve hız sınırı (rate limit) meta verilerini inceleme.
-- Kimlik doğrulama hatalarını (401 Unauthorized) ve üretim ortamı güvenlik kurallarını yönetme.
+Bu sayfada bir API anahtarı oluşturmayı, `/profile` endpoint'i ile anahtarı test etmeyi ve sık karşılaşılan hataları çözmeyi anlatıyoruz.
 
 ## Başlamadan önce
 
-API anahtarı oluşturabilmek için hesabınızın **Yönetici** veya **Kurucu** rolüne sahip olması gerekir. Standart kullanıcı hesapları güvenlik gereği geliştirici ayarlarına erişemez.
+API anahtarı oluşturabilmek için hesabınızın Yönetici veya Kurucu rolüne sahip olması gerekir. Diğer roller geliştirici ayarları sayfasına erişemez.
 
-1. `https://use.hipcall.com.tr/` adresinden Hipcall yönetim paneline giriş yapın.
-2. Sol menüden **Ayarlar > Geliştirici** sayfasına gidin.
-3. **API** sekmesini seçin.
-4. **Yeni** butonuna tıklayın.
-5. Anahtarınız için açıklayıcı bir **Ad** girin (Örn: `CRM Entegrasyonu`).
-6. **Son geçerlilik tarihi** belirleyin. Süre en az 1 gün, en fazla 3 yıl olabilir (varsayılan süre 1 yıldır).
-7. **Oluştur** butonuna tıklayın.
+1. `https://use.hipcall.com.tr/` adresinden panele giriş yapın.
+2. Sol menüden Ayarlar > Geliştirici sayfasına gidin.
+3. API sekmesini açın.
+4. Yeni butonuna tıklayın.
+5. Anahtara ne için kullandığınızı anlatan bir ad verin (örneğin `CRM Entegrasyonu`).
+6. Son geçerlilik tarihi seçin. Aralık 1 gün ile 3 yıl arasındadır, varsayılan 1 yıldır.
+7. Oluştur butonuna tıklayın.
 
-Oluşturma işleminin hemen ardından Hipcall gizli anahtarın tamamını ekranda gösterir. Sayfadan ayrılmadan önce bu anahtarı güvenli bir şifre yöneticisine kaydedin. Sayfa kapandıktan sonra anahtarın açık hali bir daha görüntülenemez; panelde güvenlik amacıyla yalnızca maskelenmiş biçimi listelenir.
+Hipcall, anahtarı oluşturduktan hemen sonra tam halini ekranda bir kez gösterir. Sayfadan ayrılmadan önce anahtarı bir şifre yöneticisine kopyalayın. Sonrasında panelde yalnızca maskelenmiş hali görünür.
 
 ## İlk isteğinizi gönderin
 
-API anahtarınızı betiklerin içine açık metin olarak gömmek yerine bir çevre değişkeninde saklayın:
+Anahtarı kod içine yazmak yerine bir çevre değişkeninde saklayın:
 
 ```bash
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-API kimlik doğrulaması `Authorization: Bearer <token>` başlığı üzerinden çalışır. İlk bağlantıyı test etmek için profil endpoint'ine bir `GET` isteği gönderin:
+API, standart `Authorization: Bearer` başlığını kullanır. Her şeyin çalıştığını görmek için `/profile` endpoint'ine GET isteği gönderin:
 
 ```bash
 curl -sS -i \
@@ -56,11 +52,9 @@ curl -sS -i \
   https://use.hipcall.com.tr/api/v3/profile
 ```
 
-## Başarılı cevap
+## Yanıtı okuma
 
-Geçerli bir anahtarla istek gönderildiğinde API `200 OK` durum kodu döner.
-
-Dönen JSON gövdesi, anahtarın ait olduğu kullanıcı profilini, atanmış santral numaralarını, varsayılan Caller ID bilgisini ve hesap kısıtlarını içerir:
+Geçerli bir anahtar `200 OK` döner. JSON gövdesinde anahtarın bağlı olduğu kullanıcı, atanmış telefon numaraları, varsayılan Caller ID ve hesap limitleri yer alır:
 
 ```json
 {
@@ -109,15 +103,15 @@ Dönen JSON gövdesi, anahtarın ait olduğu kullanıcı profilini, atanmış sa
 }
 ```
 
-HTTP yanıt başlıklarında hız sınırı (rate limit) sayaçları da iletilir. Standart ortamlarda kota **dakikada 60 istek** olarak tanımlıdır.
+Yanıt başlıklarında hız sınırı sayaçları da gelir. Varsayılan limit dakikada 60 istektir.
 
-## Hata aldığınızda
+## Bir şeyler ters giderse
 
-Kimlik doğrulama aşamasında bir sorunla karşılaşırsanız API `401 Unauthorized` durum kodu üretir. Dönen hata mesajı sorunun kaynağını açıklar:
+API kimliğinizi doğrulayamazsa `401 Unauthorized` döner. Hata mesajı nedenini söyler.
 
-### 1. Authorization başlığı eksik olduğunda
+### Başlık eksik
 
-İstek gönderirken `Authorization` başlığını eklemezseniz API isteği reddeder:
+`Authorization` başlığını eklemeyi unutursanız şu yanıtı alırsınız:
 
 ```json
 {
@@ -127,11 +121,11 @@ Kimlik doğrulama aşamasında bir sorunla karşılaşırsanız API `401 Unautho
 }
 ```
 
-**Çözüm:** İstek başlıklarınızda `Authorization: Bearer <token>` parametresinin yer aldığından ve token değerinin boş olmadığından emin olun.
+İsteğinizde `Authorization: Bearer <token>` başlığının olduğundan ve çevre değişkeninin tanımlı olduğundan emin olun.
 
-### 2. Anahtar geçersiz veya süresi dolmuş olduğunda
+### Anahtar geçersiz veya süresi dolmuş
 
-Eski, silinmiş veya süresi bitmiş bir anahtar kullanıldığında dönen yanıt:
+Anahtar silinmiş ya da süresi geçmişse:
 
 ```json
 {
@@ -141,17 +135,17 @@ Eski, silinmiş veya süresi bitmiş bir anahtar kullanıldığında dönen yan�
 }
 ```
 
-**Çözüm:** Panelden anahtarın durumunu ve son geçerlilik tarihini kontrol edin. Gerekiyorsa eski anahtarı silip yeni bir anahtar tanımlayın.
+Panelde Ayarlar > Geliştirici > API sayfasından anahtarın durumunu kontrol edin. Süresi dolmuşsa veya güvenliğinden şüphe ediyorsanız eski anahtarı silip yenisini oluşturun.
 
-## Güvenlik kuralları
+## Anahtarınızı güvende tutun
 
-- API anahtarınızı Git repolarına, kamuya açık kod bloklarına veya istemci taraflı (tarayıcı / mobil) kaynak kodlarına gömmeyin.
-- Servislerinizi yapılandırırken anahtarları Docker Secrets, Kubernetes Secrets veya ortam değişkenleri (`.env`) aracılığıyla iletin.
-- Anahtarın güvenliğinden şüphe duyduğunuz an yönetim panelinden ilgili anahtarı silin; silinen anahtar anında geçersiz hale gelir.
+- API anahtarlarını Git reposuna eklemeyin, frontend koduna yazmayın.
+- Üretim ortamında anahtarları çevre değişkenleri, Docker Secrets veya bir bulut anahtar kasası ile iletin.
+- Bir anahtarın sızdığını düşünüyorsanız panelden silin. Silinen anahtar anında geçersiz olur.
 
 ## Parametre listesi
 
-Profil endpoint'i herhangi bir sorgu parametresi (query parameter) veya JSON gövdesi gerektirmez:
+Profil endpoint'i sorgu parametresi veya istek gövdesi almaz:
 
 | Parametre | Konum | Tip | Zorunlu | Açıklama |
 |---|---|---|---|---|
@@ -159,6 +153,6 @@ Profil endpoint'i herhangi bir sorgu parametresi (query parameter) veya JSON gö
 
 ## Sonraki adımlar
 
-- Tüm endpoint ve şemaları interaktif olarak denemek için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasını ziyaret edin.
-- Entegrasyon geliştirmeye devam etmek için çağrı kayıtlarını listeleme ve filtreleme adımlarına geçin.
-- Sorularınızı ve deneyimlerinizi paylaşmak için [Hipcall Topluluk](https://community.hipcall.com/) forumuna katılın.
+- Diğer endpoint'leri denemek için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasına bakın.
+- Çağrı kayıtlarını listeleme ve filtreleme adımlarına geçin.
+- Sorularınızı [Hipcall Topluluk](https://community.hipcall.com/) forumunda paylaşın.

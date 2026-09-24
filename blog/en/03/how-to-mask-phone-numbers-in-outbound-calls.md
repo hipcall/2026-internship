@@ -18,33 +18,29 @@ status: review
 
 ## Overview
 
-In field services, online marketplaces, courier logistics, and human resources screening, connecting two parties while keeping their personal phone numbers private is a vital security and compliance requirement. When a technician or delivery driver calls a customer directly from a personal phone, their mobile number is exposed to the customer; and when the customer calls back, they reach the employee's personal device. Storing customer numbers on unmanaged personal handsets also introduces serious GDPR and data privacy risks.
+A courier needs to call a customer about a delivery. If the courier dials from a personal phone, the customer sees the courier's number and can call it back after the delivery is over. The same problem shows up in marketplaces, real estate, and field service: two people need to talk, but neither should keep the other's number.
 
-The Hipcall API solves this by transforming outbound calls into a single, programmatic HTTP POST request (click-to-call). Through call masking parameters, both parties converse across a managed PBX bridge without either seeing the other's personal phone number.
+Hipcall handles this with a single API call. Your app sends an HTTP POST, the PBX connects both sides through a company number, and neither party sees the other's real phone number.
 
-In this guide, you will implement the following architectural workflow:
-- Initiating outbound calls from your CRM and managing default corporate caller IDs.
-- Masking destination numbers on the agent interface using `call_masking` and contextual labels via `call_masking_name`.
-- Directing call progression order with `ring_user_first` to prevent customers from waiting on dead air.
-- Navigating the asynchronous nature of HTTP 201 responses and diagnosing silent drops when an agent is offline.
+This page covers starting an outbound call, enabling masking, choosing which company number the customer sees, and understanding what the API response actually tells you.
 
 ## Before you start
 
-Before triggering calls through the API, ensure you have the following ready:
+You need three things:
 
-- **An API key:** Generate an API token in your Hipcall dashboard under Settings > Developer.
-- **A registered device:** The originating agent must have an active, registered device (Hipcall web app, desktop client, or mobile SIP softphone) online.
-- **An active outbound number:** You need a registered virtual number to present as the Caller ID. You can list your available numbers using `GET /api/v3/numbers`.
+- An API key. See [How to get a Hipcall API key](/developers/how-to-get-a-hipcall-api-key/) if you do not have one.
+- A registered device for the agent. The agent's Hipcall app (web, desktop, or mobile) must be online. If the device is offline, the API accepts the request but the call never connects.
+- At least one outbound number. List yours with `GET /api/v3/numbers`.
 
-Set your API token as an environment variable in your terminal:
+Set the API key:
 
 ```bash
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-## Initiating outbound calls via click-to-call
+## Starting a call
 
-Call masking is built directly on top of Hipcall's click-to-call infrastructure. The standard method to initiate a call for an agent is sending an HTTP POST request to the `/users/{user_id}/call` endpoint. Provide the recipient's phone number in international E.164 format (`+44...`):
+Send a POST to `/users/{user_id}/call` with the customer's number in E.164 format:
 
 ```bash
 curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
@@ -57,16 +53,16 @@ curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
   }'
 ```
 
-### Controlling the call sequence (ring_user_first)
+### Which side rings first (ring_user_first)
 
-The `ring_user_first` parameter is a mandatory boolean that determines which side rings first:
+`ring_user_first` is required. It controls the order:
 
-- **`true` (Recommended):** Hipcall rings the agent's application first. As soon as the agent answers, the PBX dials the customer. This sequence ensures the customer is not connected to a silent line before an agent is ready.
-- **`false`:** The PBX attempts to dial the customer immediately while simultaneously connecting the agent. If the agent is unavailable or offline, the call drops without connection.
+- `true` (recommended): The agent's app rings first. When the agent picks up, the PBX dials the customer. The customer never lands on a silent line.
+- `false`: The PBX dials the customer right away. If the agent is not ready, the call drops.
 
-### Choosing your outbound caller ID (number_id)
+### Choosing the outbound number (number_id)
 
-You can select which registered corporate phone number appears on the recipient's phone screen using the `number_id` parameter:
+`number_id` sets which company number the customer sees on their phone:
 
 ```bash
 curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
@@ -80,16 +76,17 @@ curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
   }'
 ```
 
-Key rules regarding the `number_id` parameter:
+If you leave `number_id` out, the API uses the agent's default number from their profile. You can list available numbers with `GET /api/v3/numbers`.
 
-1. **Default Outbound Number:** If you omit `number_id`, Hipcall falls back to the user's default number (`default_number`) configured in their profile. Users can change their default number under Settings > Profile.
-2. **Parameter Distinction:** `callee_number` specifies the recipient you are dialing; `number_id` specifies the ID of your own registered number from which the call originates.
-3. **Extension Calls:** In `/extensions/{extension_id}/call`, specifying `number_id` is mandatory, whereas in `/users/{user_id}/call`, it remains optional.
-4. **Number Formatting (E.164):** While the Hipcall PBX can automatically strip leading national trunk zeros or whitespace based on account region settings, passing fully qualified E.164 format (`+44...`) in production avoids routing ambiguities across multi-location deployments.
+Two things people mix up: `callee_number` is who you are calling; `number_id` is which of your own numbers appears on their screen.
 
-## Enabling call masking
+When calling through `/extensions/{extension_id}/call`, `number_id` is required. Through `/users/{user_id}/call`, it is optional.
 
-To hide the destination phone number from the agent, pass `call_masking: true`. To replace placeholder zeros with a contextual identifier on the agent's screen, specify `call_masking_name`:
+The API can accept numbers without a country code, like `02079460123`. In these cases, it interprets the number based on the default country tied to the user or account (e.g., the UK). However, in production, always send the full E.164 format (`+44...`). It avoids routing surprises and failed calls when accounts span multiple countries.
+
+## Turning on masking
+
+Add `call_masking: true` to hide the customer's number from the agent. Add `call_masking_name` to show a label instead of zeros:
 
 ```bash
 curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
@@ -105,18 +102,51 @@ curl -X "POST" "https://use.hipcall.com/api/v3/users/4200/call" \
   }'
 ```
 
-### What both sides see
+### What each side sees
 
-- **Agent Display:** When `call_masking: true` is set, the callee's real number is hidden. If `call_masking_name` is omitted, the screen shows `0000000000`. If specified (e.g., `"Order #1042"`), this label replaces the zeros. The agent never sees or copies the customer's personal number.
-- **Customer Display:** The customer sees your corporate outbound number (`number_id`). The agent's personal phone or direct line is never transmitted.
+- The agent sees `0000000000` if you omit `call_masking_name`, or the label you set (e.g. "Order #1042"). The real number never appears on the agent's screen.
+- The customer sees the company number you picked with `number_id`. The agent's personal number is never shown.
 
-### Real numbers in call detail records (CDR)
+### Call records keep the real numbers
 
-Call masking is strictly a presentation-layer feature for agent privacy. The underlying database and Call Detail Records (`GET /api/v3/calls`) retain complete, unmasked E.164 phone numbers for regulatory compliance, billing audits, and management analytics.
+Masking only affects what the agent sees during the call. The call detail records (`GET /api/v3/calls`) still contain the full, unmasked numbers. This is by design: billing, legal compliance, and reporting need the real data.
 
-## Complete C# implementation
+## What the 201 response means
 
-The following C# class uses a single `HttpClient` instance, reads the API token from the environment variable, supports masking and outbound number selection, and preserves API error bodies:
+When the API accepts your request, it returns `201 Created` with a call ID:
+
+```json
+{
+  "data": {
+    "id": "19d354e6-2be8-4c4e-bd49-fd12545f71a4"
+  }
+}
+```
+
+```mermaid
+sequenceDiagram
+    participant App as Your App (CRM)
+    participant API as Hipcall API
+    participant Agent as Agent Device
+    participant Customer as Customer Phone
+
+    App->>API: POST /users/{id}/call (ring_user_first: true)
+    API-->>App: 201 Created (data.id: UUID)
+    Note over App,API: Call queued. Not connected yet.
+    API->>Agent: Ring agent device
+    Agent-->>API: Agent answers
+    API->>Customer: Dial customer number
+    Customer-->>API: Customer answers
+    Note over Agent,Customer: Both sides bridged. Call in progress.
+```
+
+This is the most important part: a 201 means the PBX accepted the command. It does not mean the customer's phone rang, or that anyone picked up. Even if the agent's device is turned off, you still get a 201. The PBX tries to reach the agent, fails, and drops the call silently.
+
+Do not mark calls as "connected" in your CRM based on this response alone. Use webhooks or poll `GET /api/v3/calls` and check `bridged_at` and `call_duration` to know whether the call actually went through.
+
+## The full script
+
+This class wraps the call endpoint. It uses a single `HttpClient`, reads the token from the environment, and keeps the API error message when something fails:
 
 ```csharp
 using System.Net.Http.Headers;
@@ -182,7 +212,7 @@ public sealed class HipcallClient
 }
 ```
 
-To invoke the client in your application:
+To run the application:
 
 ```csharp
 var client = new HipcallClient();
@@ -195,56 +225,20 @@ string callId = await client.StartCallAsync(
     callMaskingName: "Order #1042"
 );
 
-Console.WriteLine($"Call queued successfully. Call ID: {callId}");
+Console.WriteLine($"Call queued. Call ID: {callId}");
 ```
 
-### Key architectural details
+### Notes on this code
 
-- **Reused HttpClient instance:** Initializing a single `static readonly HttpClient` avoids socket exhaustion under high call initiation volume.
-- **Preserving API error bodies:** When a non-200 response occurs, the full JSON payload is captured and exposed before an exception is raised, ensuring actionable feedback.
-- **Optional parameter defaults:** Masking and caller ID parameters are optional; when left unspecified, user-level profile defaults take precedence.
-
-## Asynchronous call flow and the HTTP 201 response
-
-When the API accepts your request, it returns an HTTP `201 Created` status code containing a call UUID:
-
-```json
-{
-  "data": {
-    "id": "19d354e6-2be8-4c4e-bd49-fd12545f71a4"
-  }
-}
-```
-
-```mermaid
-sequenceDiagram
-    participant App as Your App (CRM)
-    participant API as Hipcall API
-    participant Agent as Agent Device
-    participant Customer as Customer Phone
-
-    App->>API: POST /users/{id}/call (ring_user_first: true)
-    API-->>App: 201 Created (data.id: UUID)
-    Note over App,API: Call queued in PBX. Not yet connected.
-    API->>Agent: Ring agent device
-    Agent-->>API: Agent answers
-    API->>Customer: Dial customer number
-    Customer-->>API: Customer answers
-    Note over Agent,Customer: Both legs bridged. Call in progress.
-```
-
-Understand the exact boundaries of this response:
-
-- **What it verifies:** The request payload was valid, authentication succeeded, and the PBX engine successfully queued the call command.
-- **What it does not guarantee:** It does not guarantee that the customer's phone rang, that the customer answered, or that an audio bridge was established. Even if the agent's device is offline or in airplane mode, the API returns HTTP `201 Created`; the PBX then terminates the session when it fails to reach the agent.
-
-Do not mark calls as "connected" or "completed" in your CRM based solely on a `201 Created` response. Monitor Webhooks or poll `GET /api/v3/calls` to check `bridged_at` and `call_duration`.
+- Create a single `HttpClient` and reuse it. Opening a new one per request inside a loop exhausts sockets.
+- When the API returns an error, print the full response body. Using only `EnsureSuccessStatusCode()` hides the API's error message.
+- Masking and `number_id` are optional parameters. If you leave them out, the user's profile defaults apply.
 
 ## When it fails
 
 ### 422 Unprocessable Entity
 
-Returned when mandatory fields are omitted. For example, omitting the required `ring_user_first` field:
+Missing a required field. For example, leaving out `ring_user_first`:
 
 ```json
 {
@@ -256,11 +250,11 @@ Returned when mandatory fields are omitted. For example, omitting the required `
 }
 ```
 
-**Fix:** Ensure both mandatory fields, `callee_number` and `ring_user_first` (`true` or `false`), are present in your JSON payload.
+Both `callee_number` and `ring_user_first` must be in the request body.
 
 ### 404 Not Found
 
-Returned when an invalid `user_id` or `extension_id` is supplied:
+The user ID or extension ID does not exist:
 
 ```json
 {
@@ -270,27 +264,28 @@ Returned when an invalid `user_id` or `extension_id` is supplied:
 }
 ```
 
-**Fix:** Verify the user ID using `GET /api/v3/users` or extension ID using `GET /api/v3/extensions`.
+Verify the ID with `GET /api/v3/users` or `GET /api/v3/extensions`.
 
-### Offline agent device (Silent call drop)
+### Agent device offline (silent drop)
 
-If the representative's Hipcall web phone or softphone client is closed or disconnected from the network:
-- The API still returns HTTP `201 Created` because the dispatch command was queued in the telephony engine.
-- The PBX attempts to reach the agent device; receiving no handshake, it terminates the call session without ever dialing the customer.
-- **Diagnosis:** To determine why a call did not connect, inspect the `call_hangup` webhook payload for `hangup_by: "system"`, or check agent device registration in the dashboard logs.
+If the agent's Hipcall app is closed or disconnected:
+
+- The API still returns `201 Created` because the command was queued.
+- The PBX tries to reach the agent, gets no answer, and terminates the call without ever dialing the customer.
+- To find out why a call did not connect, check the `call_hangup` webhook for `hangup_by: "system"`, or look at the agent's device status in the dashboard logs.
 
 ## Parameter reference
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `callee_number` | string | yes | Recipient phone number in E.164 format (e.g., `+442079460123`). |
-| `ring_user_first` | boolean | yes | Rings the agent before dialing the recipient (`true`) or dials recipient directly (`false`). Mandatory field. |
-| `number_id` | integer | no | ID of the registered outbound number displayed to the recipient. If omitted, uses the agent's default number. |
-| `call_masking` | boolean | no | Masks the recipient number as `0000000000` on the agent's screen. |
-| `call_masking_name` | string | no | Replaces the zeros with a custom label on the agent's screen (max 30 chars). |
+| `callee_number` | string | yes | Customer's phone number in E.164 format (e.g. `+442079460123`). |
+| `ring_user_first` | boolean | yes | Ring the agent first (`true`, recommended) or dial the customer directly (`false`). |
+| `number_id` | integer | no | ID of the company number shown to the customer. Uses the agent's default if omitted. |
+| `call_masking` | boolean | no | Hides the customer's number on the agent's screen, showing `0000000000` instead. |
+| `call_masking_name` | string | no | Replaces the zeros with a label (max 30 characters). |
 
 ## Next steps
 
-- Build a webhook receiver to handle real-time call events like answers, bridges, and hangups.
-- Review additional query parameters and filters in the [Hipcall API Reference](https://use.hipcall.com/api-docs/).
-- Share your integration experiences or ask technical questions in the [Hipcall Community](https://community.hipcall.com/).
+- Set up a webhook receiver to get notified when calls connect, bridge, or hang up.
+- Explore more parameters in the [Hipcall API Reference](https://use.hipcall.com/api-docs/).
+- Ask questions in the [Hipcall Community](https://community.hipcall.com/).

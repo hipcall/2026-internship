@@ -18,23 +18,17 @@ status: review
 
 ## Genel bakış
 
-Çağrı merkezlerinde ve satış ekiplerinde cevapsız kalan her çağrı, kaybedilmiş bir iş fırsatı veya yanıtlanamamış bir müşteri talebi anlamına gelir. Yönetim panelinden manuel olarak rapor indirmek tek seferlik incelemeler için yeterli olsa da, CRM senkronizasyonu veya otomatik geri arama iş akışları kurmak için programatik bir veri boru hattına (data pipeline) ihtiyaç duyulur.
+Çağrı merkezlerinde cevapsız çağrılar hızla birikir. Yönetim panelinden rapor indirmek anlık incelemeler için yeterlidir, ancak CRM uygulamanız bu kayıtlara her sabah ihtiyaç duyuyorsa kendi başına çalışan bir araç gerekir.
 
-Hipcall API, çağrı kayıtlarını esnek filtrelerle sorgulamanıza ve büyük veri kümelerini sayfalama mekanizmasıyla dışarı aktarmanıza olanak tanır.
-
-Bu rehberde şu mimari adımları uyguluyoruz:
-- Köşeli parantez filtre söz dizimiyle (`started_at[gte]`, `missing_call[eq]`) hedef veri kümesini daraltma.
-- `meta.count` ve `offset` parametrelerini kullanarak bellek tüketmeden tüm sayfaları dolaşan güvenilir bir sayfalama döngüsü kurma.
-- Soket tükenmesini (socket exhaustion) önleyen tekil `HttpClient` mimarisiyle verileri çeken bir C# konsol uygulaması geliştirme.
-- Alınan çağrı kayıtlarını standart tırnak korumasıyla biçimlendirip doğrudan CSV dosyasına yazma.
+Hipcall API, çağrı kayıtlarını filtrelemenize ve tüm sayfaları dolaşmanıza olanak tanır. Bu rehberde cevapsız çağrıları çekmeyi, tüm sayfaları okumayı ve bir C# betiğiyle CSV dosyasına yazmayı anlatıyoruz.
 
 ## Başlamadan önce
 
-Çalışmaya başlamadan önce şu gereksinimleri hazırlayın:
+Çalışmaya başlamadan önce şunları hazırlayın:
 
-- Çağrı kayıtlarını okuma yetkisine sahip geçerli bir **Hipcall API anahtarı**.
-- Bilgisayarınızda veya sunucunuzda kurulu **.NET 8 SDK** (`dotnet --version` çıktısı `8.0` veya üstü olmalıdır).
-- Sayfalama mantığını test edebilmek için hesabınızda birkaç çağrı kaydının bulunması önerilir.
+- Çağrı kayıtlarını okuma yetkisine sahip geçerli bir Hipcall API anahtarı.
+- Bilgisayarınızda veya sunucunuzda kurulu .NET 8 SDK (`dotnet --version` çıktısı `8.0` veya üstü olmalı).
+- Sayfalama mantığını test edebilmek için hesabınızda birkaç çağrı kaydı.
 
 API anahtarınızı terminal oturumunuzda ortam değişkeni olarak tanımlayın:
 
@@ -44,12 +38,12 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 
 ## Çağrıları tarih ve duruma göre filtreleme
 
-Hipcall API listeleme endpoint'lerinde esnek bir köşeli parantez filtre söz dizimi (`?alan[operatör]=değer`) kullanılır. 
+Hipcall listeleme endpoint'lerinde köşeli parantez filtre söz dizimi kullanılır (`?alan[operatör]=değer`).
 
-Belirli bir tarih aralığındaki cevapsız çağrıları listelemek için üç temel filtreyi bir arada kullanırız:
-- `missing_call[eq]=true`: Yalnızca cevapsız (karşılanmamış) çağrıları getirir.
-- `started_at[gte]`: Belirtilen başlangıç tarihinden sonra başlayan çağrılar.
-- `started_at[lte]`: Belirtilen bitiş tarihinden önce başlayan çağrılar.
+Belirli bir tarih aralığındaki cevapsız çağrıları çekmek için üç temel filtreyi birleştirin:
+- `missing_call[eq]=true`: Yalnızca cevapsız çağrıları getirir.
+- `started_at[gte]`: Başlangıç tarihinden sonra başlayan çağrılar.
+- `started_at[lte]`: Bitiş tarihinden önce başlayan çağrılar.
 
 Örnek filtreleme isteği:
 
@@ -64,11 +58,11 @@ curl -sS -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
 | `started_at` | `gte` | `2026-09-01T00:00:00Z` | Belirtilen tarih ve sonrasındaki çağrılar. |
 | `started_at` | `lte` | `2026-09-08T23:59:59Z` | Belirtilen tarih ve öncesindeki çağrılar. |
 
-Tarih değerleri mutlaka ISO 8601 UTC formatında (`YYYY-MM-DDTHH:mm:ssZ`) gönderilmelidir. URL içindeki `[` ve `]` karakterleri bazı HTTP istemcilerinde sorun oluşturmaması için sırasıyla `%5B` ve `%5D` olarak kodlanmalıdır.
+Tarih değerlerini her zaman ISO 8601 UTC formatında (`YYYY-MM-DDTHH:mm:ssZ`) gönderin. URL içindeki `[` ve `]` karakterlerini HTTP istemcilerinde sorun yaşamamak için `%5B` ve `%5D` olarak kodlayın.
 
 ## Cevap yapısı ve sayfalama mantığı
 
-Hipcall liste endpoint'leri standart olarak `data` ve `meta` nesnelerinden oluşan bir yapı döner:
+Hipcall liste endpoint'leri standart olarak `data` dizisi ve `meta` nesnesi döner:
 
 ```json
 {
@@ -83,12 +77,12 @@ Hipcall liste endpoint'leri standart olarak `data` ve `meta` nesnelerinden oluş
 
 | Alan | Anlamı |
 |---|---|
-| `data` | Geçerli sayfada döndürülen çağrı kayıtları dizisi. |
-| `meta.count` | Filtre kriterlerine uyan toplam kayıt sayısı. |
+| `data` | Geçerli sayfada dönen çağrı kayıtları. |
+| `meta.count` | Filtreye uyan toplam kayıt sayısı. |
 | `meta.offset` | Bu sayfadan önce atlanan kayıt sayısı. |
-| `meta.limit` | Sayfa başına döndürülen maksimum kayıt sayısı (varsayılan: 10, üst sınır: 100). |
+| `meta.limit` | Sayfa başına dönen maksimum kayıt sayısı (varsayılan: 10, üst sınır: 100). |
 
-Toplam sayfa sayısı `ceil(meta.count / meta.limit)` formülüyle hesaplanır (örneğin 142 kayıt için 100'lük limit ile ilk sayfa 100, ikinci sayfa 42 kayıt döner). Tüm kayıtları toplamak için `offset` değerini her adımda `limit` kadar artırarak döngü kurarız:
+Toplam sayfa sayısı `ceil(meta.count / meta.limit)` formülüyle bulunur. 142 kayıt ve 100'lük limit için ilk sayfa 100, ikinci sayfa 42 kayıt döner. Tüm kayıtları toplamak için döngü içinde `offset` değerini `limit` kadar artırın:
 
 ```mermaid
 flowchart TD
@@ -103,7 +97,9 @@ flowchart TD
     G -- Hayır --> I["Tüm kayıtlar toplandı, CSV'ye yaz"]
 ```
 
-## C# ile CSV dışa aktarma uygulaması
+Siz sayfaları çekerken sisteme yeni bir çağrı eklenir veya silinirse liste kayar. İkinci sayfada aynı kaydı tekrar görebilir veya bir kaydı atlayabilirsiniz.
+
+## Betiğin tamamı
 
 Aşağıdaki C# konsol uygulaması son 7 günün cevapsız çağrılarını çeker, sayfalama sınırlarına takılmadan tüm veriyi toplar ve `missed-calls-YYYY-MM-DD.csv` dosyasına yazar:
 
@@ -184,16 +180,17 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 dotnet run
 ```
 
-### Önemli mimari detaylar
+### Kod hakkında notlar
 
-- **Tek HttpClient kullanımı:** Her HTTP isteği için döngü içinde `new HttpClient()` oluşturulmaz; tek bir `using var` örneği soket sızıntısını engeller.
-- **Kayıt sayısına dayalı döngü:** Döngü boş sayfa beklemez, ilk yanıtta gelen `meta.count` değerini baz alarak kaç sayfa okunacağını kesin olarak hesaplar.
-- **Hata gövdesini koruma:** İstek başarısız olduğunda hata gövdesi konsola yazdırılır; böylece API'nin döndürdüğü açıklayıcı hata mesajı kaybolmaz.
+- **Tek HttpClient kullanımı:** Her HTTP isteği için döngü içinde `new HttpClient()` açmayın. Tek bir `using var` örneği soket sızıntısını engeller.
+- **meta.count ile döngü:** Döngü boş sayfa beklemek yerine `meta.count` değerine bakarak durmalıdır. Boş sayfa beklemek fazladan istek atmanıza ve veriler değişirse eksik sonuç almanıza yol açar.
+- **Hata gövdesini koruma:** İstek başarısız olduğunda hata gövdesini yazdırın. Sadece `EnsureSuccessStatusCode()` kullanırsanız API'nin açıklayıcı mesajını kaybedersiniz.
 
 ## Hata aldığınızda
 
-### 1. 401 Unauthorized
-API anahtarınız tanımlanmamış, yanlış kopyalanmış veya geçerlilik süresi dolmuş olabilir.
+### 401 Unauthorized
+
+API anahtarınız tanımlanmamış, yanlış kopyalanmış veya geçerlilik süresi dolmuş:
 
 ```json
 {
@@ -203,10 +200,11 @@ API anahtarınız tanımlanmamış, yanlış kopyalanmış veya geçerlilik sür
 }
 ```
 
-**Çözüm:** Yönetim panelinden API anahtarınızın aktifliğini kontrol edin ve terminalde çevre değişkenini yeniden tanımlayın.
+Yönetim panelinden API anahtarınızı kontrol edin ve terminalde çevre değişkenini yeniden tanımlayın.
 
-### 2. 422 Unprocessable Entity
-İstekte desteklenmeyen bir filtre alanı veya geçersiz bir parametre değeri iletildiğinde döner:
+### 422 Unprocessable Entity
+
+Desteklenmeyen bir filtre alanı veya geçersiz bir değer gönderdiniz:
 
 ```json
 {
@@ -220,13 +218,14 @@ Sık yapılan hatalar ve çözümleri:
 
 | Hata Nedeni | API Mesajı | Düzeltme |
 |---|---|---|
-| `limit=1000` (Üst limit 100) | `For 'limit': Value must be less than 100.` | `limit` değerini maksimum 100 olarak belirleyin. |
-| `started_at[eq]=...` | `Unexpected field: eq` | Tarihlerde aralık belirten `gte` ve `lte` operatörlerini kullanın. |
-| Standart dışı tarih formatı | `Invalid datetime format (expected ISO8601)` | Tarihleri `2026-09-01T00:00:00Z` formatında gönderin. |
-| Sayısal yön parametresi (`direction[eq]=1`) | `Value must be a string.` | Yön için metin kullanın: `inbound` veya `outbound`. |
+| `limit=1000` (üst sınır 100) | `For 'limit': Value must be less than 100.` | `limit` değerini maksimum 100 olarak belirleyin. |
+| `started_at[eq]=...` | `Unexpected field: eq` | Tarihler için `gte` ve `lte` operatörlerini kullanın. |
+| Geçersiz tarih formatı | `Invalid datetime format (expected ISO8601)` | Tarihleri `2026-09-01T00:00:00Z` formatında gönderin. |
+| Sayısal yön (`direction[eq]=1`) | `Value must be a string.` | Yön için `inbound` veya `outbound` metinlerini kullanın. |
 
-### 3. 429 Too Many Requests
-Dakika başına istek kotasını aştığınızda döner (Standart limit dakikada 60 istektir). İstekleriniz arasına kısa gecikmeler ekleyerek işlemi tekrarlayın.
+### 429 Too Many Requests
+
+Dakikada 60 istek sınırını aştınız. İstekler arasına kısa bekleme süreleri ekleyin ve tekrar deneyin.
 
 ## Parametre listesi
 
@@ -237,14 +236,14 @@ Dakika başına istek kotasını aştığınızda döner (Standart limit dakikad
 | `limit` | integer | hayır | Sayfa başına kayıt sayısı. Aralık: 1–100. Varsayılan: 10. |
 | `offset` | integer | hayır | Atlanacak kayıt sayısı. Varsayılan: 0. |
 | `missing_call[eq]` | boolean | hayır | `true` cevapsız çağrılar, `false` cevaplanmış çağrılar. |
-| `started_at[gte]` | string | hayır | Tarih aralığının başlangıcı. ISO 8601 UTC formatında. |
-| `started_at[lte]` | string | hayır | Tarih aralığının sonu. ISO 8601 UTC formatında. |
+| `started_at[gte]` | string | hayır | Tarih aralığının başlangıcı, ISO 8601 UTC. |
+| `started_at[lte]` | string | hayır | Tarih aralığının sonu, ISO 8601 UTC. |
 | `direction[eq]` | string | hayır | Çağrı yönü: `inbound` veya `outbound`. |
 | `direction[in]` | string | hayır | Birden fazla yön, virgülle ayrılmış. |
-| `sort` | string | hayır | Sıralama alanı ve yönü. Format: `alan.asc` veya `alan.desc`. `/calls` endpoint'i `started_at` alanını destekler. |
+| `sort` | string | hayır | Sıralama alanı ve yönü, ör. `started_at.desc`. |
 
 ## Sonraki adımlar
 
 - Diğer kayıt türlerini incelemek için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasındaki `/contacts` ve `/companies` endpoint'lerini ziyaret edin.
-- Geri arama süreçlerini hızlandırmak için giden arama ve numara maskeleme rehberine göz atın.
-- Entegrasyon sorularınız için [Hipcall Topluluk](https://community.hipcall.com/) platformunda sorularınızı paylaşın.
+- Müşteri geri araması kurmak için giden arama ve numara maskeleme rehberine göz atın.
+- Sorularınızı [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.

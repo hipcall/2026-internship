@@ -18,23 +18,17 @@ status: review
 
 ## Overview
 
-In call centers and sales teams, every missed call represents a lost business opportunity or an unhandled customer request. While downloading reports manually from the web dashboard works for ad-hoc reviews, automated CRM synchronization and scheduled callback workflows require an unattended, programmatic data pipeline.
+Missed calls pile up fast in a busy call center. You can download a report from the web dashboard when you need a quick look, but if your CRM needs those records every morning at 8 AM, you need something that runs on its own.
 
-The Hipcall API allows you to query call detail records (CDRs) using flexible filters and ingest large datasets through robust pagination.
-
-In this guide, you will implement the following architectural workflow:
-- Narrowing query results using bracket filter syntax (`started_at[gte]`, `missing_call[eq]`).
-- Building an automated pagination loop driven by `meta.count` and `offset` that streams records without memory bloat.
-- Developing a production-ready C# console application utilizing a singleton `HttpClient` pattern to prevent socket exhaustion.
-- Formatting and streaming call records safely into a delimited CSV file with quote protection.
+The Hipcall API lets you pull call detail records using flexible filters and page through all of them. This guide shows how to pull missed calls, page through the results, and write them to a CSV file using a C# script.
 
 ## Before you start
 
-Before getting started, make sure you have the following prerequisites in place:
+Before getting started, make sure you have:
 
-- A valid **Hipcall API key** with permissions to read call detail records (CDRs).
-- The **.NET 8 SDK** installed on your workstation or server (`dotnet --version` output should be `8.0` or higher).
-- A few call records in your account to test pagination behavior.
+- A valid Hipcall API key that can read call records.
+- The .NET 8 SDK installed on your workstation or server (`dotnet --version` should output `8.0` or higher).
+- A few call records in your account to test pagination.
 
 Set your API key as an environment variable in your terminal session:
 
@@ -44,12 +38,12 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 
 ## Filtering calls by date and status
 
-Hipcall API list endpoints utilize a flexible bracket filter syntax (`?field[operator]=value`).
+Hipcall API list endpoints use a bracket filter syntax (`?field[operator]=value`).
 
-To retrieve missed calls within a specific date range, we combine three core filters:
-- `missing_call[eq]=true`: Returns only missed (unanswered) calls.
-- `started_at[gte]`: Calls that started on or after the specified start date.
-- `started_at[lte]`: Calls that started on or before the specified end date.
+To get missed calls within a specific date range, combine three filters:
+- `missing_call[eq]=true`: Returns only missed calls.
+- `started_at[gte]`: Calls on or after the start date.
+- `started_at[lte]`: Calls on or before the end date.
 
 Example filter request:
 
@@ -64,11 +58,11 @@ curl -sS -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
 | `started_at` | `gte` | `2026-09-01T00:00:00Z` | Calls on or after the specified timestamp. |
 | `started_at` | `lte` | `2026-09-08T23:59:59Z` | Calls on or before the specified timestamp. |
 
-Timestamps must always be sent in ISO 8601 UTC format (`YYYY-MM-DDTHH:mm:ssZ`). To ensure compatibility across different HTTP clients and proxies, encode the `[` and `]` characters in URLs as `%5B` and `%5D` respectively.
+Timestamps must always be in ISO 8601 UTC format (`YYYY-MM-DDTHH:mm:ssZ`). URL-encode the `[` and `]` characters as `%5B` and `%5D` to prevent issues with some HTTP clients.
 
 ## Response structure and pagination logic
 
-Hipcall list endpoints return a standard response envelope containing `data` and `meta` objects:
+Hipcall list endpoints return a `data` array and a `meta` object:
 
 ```json
 {
@@ -83,12 +77,12 @@ Hipcall list endpoints return a standard response envelope containing `data` and
 
 | Field | Description |
 |---|---|
-| `data` | Array of call records returned for the current page. |
-| `meta.count` | Total number of records matching the filter criteria. |
+| `data` | The call records for the current page. |
+| `meta.count` | Total number of records matching the filter. |
 | `meta.offset` | Number of records skipped before this page. |
-| `meta.limit` | Maximum records returned per page (default: 10, maximum: 100). |
+| `meta.limit` | Maximum records returned per page (default: 10, max: 100). |
 
-The total page count is calculated using the formula `ceil(meta.count / meta.limit)` (for example, with 142 matching records and a limit of 100, the first page returns 100 records and the second page returns 42). To collect all records, increment `offset` by `limit` on each step within a loop:
+The total page count is `ceil(meta.count / meta.limit)`. If you have 142 records and a limit of 100, the first page returns 100 and the second returns 42. To collect all records, increment `offset` by `limit` in a loop:
 
 ```mermaid
 flowchart TD
@@ -103,9 +97,11 @@ flowchart TD
     G -- No --> I["All records collected, write to CSV"]
 ```
 
-## Complete C# CSV export application
+If a new call arrives or is deleted while you are paging, the list shifts. You might see the same record twice or miss one on the next page.
 
-The following C# console application fetches missed calls from the last 7 days, collects all records across page boundaries, and writes them to a `missed-calls-YYYY-MM-DD.csv` file:
+## The full script
+
+This C# console app fetches missed calls from the last 7 days, pages through all records, and writes them to a `missed-calls-YYYY-MM-DD.csv` file:
 
 ```csharp
 using System.Net.Http.Headers;
@@ -184,16 +180,17 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 dotnet run
 ```
 
-### Key architectural details
+### Notes on this code
 
-- **Single HttpClient usage:** Creating a `new HttpClient()` inside a loop causes socket exhaustion under high request volume; a single `using var` instance avoids this issue.
-- **Loop driven by total count:** Instead of waiting for an empty page, the loop uses `meta.count` from the initial response to calculate exactly how many pages to fetch.
-- **Preserving error bodies:** When a request fails, the response body is printed to stderr so the descriptive error message returned by the API is never lost.
+- **Single HttpClient:** Create a single `HttpClient` and reuse it. Opening a new one per request inside a loop exhausts sockets.
+- **Loop driven by meta.count:** The loop stops based on `meta.count`. Waiting for an empty page wastes an extra request and causes issues if records shift while paging.
+- **Preserving error bodies:** When a request fails, print the full response body. Using only `EnsureSuccessStatusCode()` hides the API's error message.
 
 ## When it fails
 
-### 1. 401 Unauthorized
-Your API token may be undefined, copied incorrectly, or expired:
+### 401 Unauthorized
+
+Your API token is missing, wrong, or expired:
 
 ```json
 {
@@ -203,10 +200,11 @@ Your API token may be undefined, copied incorrectly, or expired:
 }
 ```
 
-**Resolution:** Verify your API key status in the developer dashboard and redefine the environment variable in your terminal session.
+Verify your API key in the developer dashboard and redefine the environment variable.
 
-### 2. 422 Unprocessable Entity
-Returned when an unsupported filter field or an invalid parameter value is passed in the request:
+### 422 Unprocessable Entity
+
+The API rejected an unsupported filter field or an invalid value:
 
 ```json
 {
@@ -220,31 +218,32 @@ Common mistakes and solutions:
 
 | Error Cause | API Message | Fix |
 |---|---|---|
-| `limit=1000` (Upper limit 100) | `For 'limit': Value must be less than 100.` | Set `limit` to a maximum value of 100. |
-| `started_at[eq]=...` | `Unexpected field: eq` | Use range operators `gte` and `lte` for dates. |
+| `limit=1000` (max 100) | `For 'limit': Value must be less than 100.` | Set `limit` to 100 or less. |
+| `started_at[eq]=...` | `Unexpected field: eq` | Use `gte` and `lte` for dates. |
 | Non-standard date format | `Invalid datetime format (expected ISO8601)` | Format timestamps as `2026-09-01T00:00:00Z`. |
-| Numeric direction parameter (`direction[eq]=1`) | `Value must be a string.` | Use string values for direction: `inbound` or `outbound`. |
+| Numeric direction (`direction[eq]=1`) | `Value must be a string.` | Use `inbound` or `outbound`. |
 
-### 3. 429 Too Many Requests
-Returned when you exceed the rate limit per minute (the standard limit is 60 requests per minute). Introduce short pauses between pagination requests and retry.
+### 429 Too Many Requests
+
+You exceeded the rate limit (60 requests per minute). Add a short pause between pagination requests and retry.
 
 ## Parameter reference
 
-Parameters available when filtering on the `/api/v3/calls` endpoint:
+Parameters for the `/api/v3/calls` endpoint:
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `limit` | integer | no | Records returned per page. Range: 1–100. Default: 10. |
+| `limit` | integer | no | Records per page. Range: 1–100. Default: 10. |
 | `offset` | integer | no | Number of records to skip. Default: 0. |
 | `missing_call[eq]` | boolean | no | Set to `true` for missed calls, `false` for answered calls. |
-| `started_at[gte]` | string | no | Start of the date range in ISO 8601 UTC format. |
-| `started_at[lte]` | string | no | End of the date range in ISO 8601 UTC format. |
-| `direction[eq]` | string | no | Call direction: `inbound` or `outbound`. |
+| `started_at[gte]` | string | no | Start of the date range in ISO 8601 UTC. |
+| `started_at[lte]` | string | no | End of the date range in ISO 8601 UTC. |
+| `direction[eq]` | string | no | `inbound` or `outbound`. |
 | `direction[in]` | string | no | Multiple directions, comma-separated. |
-| `sort` | string | no | Sort field and order. Format: `field.asc` or `field.desc`. The `/calls` endpoint supports `started_at`. |
+| `sort` | string | no | Sort field and order, e.g. `started_at.desc`. |
 
 ## Next steps
 
-- Visit the `/contacts` and `/companies` endpoints in the [Hipcall API Reference](https://use.hipcall.com/api-docs/) to explore other record types.
-- Check out the outbound calling and number masking guide to speed up customer callback workflows.
-- Share your integration questions on the [Hipcall Community](https://community.hipcall.com/) platform.
+- Visit the `/contacts` and `/companies` endpoints in the [Hipcall API Reference](https://use.hipcall.com/api-docs/).
+- Read the outbound calling and number masking guide to set up customer callbacks.
+- Ask questions in the [Hipcall Community](https://community.hipcall.com/).

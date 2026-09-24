@@ -18,20 +18,20 @@ status: review
 
 ## Genel bakış
 
-Telefon çalmaya başladığında temsilcinin ekranında beliren tek bilgi yabancı bir telefon numarası olduğunda, temsilci panik halinde CRM sekmesine geçip numarayı arama kutusuna yapıştırır ve kayıtları tarar. Bu arama ve bağlam kurma telaşı ortalama on beş saniye sürerken, hattın diğer ucundaki müşteri çoktan konuşmaya başlamıştır.
+Temsilci çalan telefonu açtığında ekranda sadece bir numara görürse, CRM sekmesine geçip bu numarayı araması ortalama on beş saniye sürer. Bu sırada müşteri konuşmaya başlamıştır.
 
-Insight Card mimarisi bu on beş saniyelik kör noktayı ortadan kaldırır. Çağrı başladığı anda müşterinin adı, şirketi, açık bakiye durumu ve hesap yöneticisi doğrudan web telefonunun arayüzünde belirir. Veri kurumun kendi veritabanından veya CRM sisteminden gelir; Hipcall bu veriyi temsilcinin önüne hazır getirerek görüşmenin ilk saniyesinden itibaren kişiselleştirilmiş bir deneyim sunulmasını sağlar.
+Insight Card bu gecikmeyi çözer. Çağrı başladığı an müşterinin adını, şirketini, bakiyesini ve hesap yöneticisini uygulamanızdan alıp web telefonuna yansıtır.
 
-Bu rehberde, ASP.NET Core Minimal API kullanarak gelen `call_init` webhook'u ile arayan numarayı yakalamayı, yerel CRM'de müşteri sorgulamayı, Insight Card bileşenlerini oluşturup canlı çağrı oturumuna göndermeyi ve çağrı yaşam döngüsünü adım adım ele alıyoruz.
+Bu sayfada ASP.NET Core Minimal API ile `call_init` olayını dinlemeyi, numarayı veritabanında sorgulamayı ve canlı çağrı oturumuna Insight Card göndermeyi anlatıyoruz.
 
 ## Başlamadan önce
 
 Çalışmaya başlamadan önce şu gereksinimlerin hazır olduğundan emin olun:
 
-- Bilgisayarınızda veya sunucunuzda **.NET 8 SDK** kurulu olmalıdır (`dotnet --version` çıktısı `8.0` veya üstü).
-- Webhook bildirimlerini alabilmek için dışarıdan erişilebilir güvenli bir HTTPS uç noktası (yerel geliştirme ortamında test etmek için ngrok veya benzeri bir tünel).
-- Hipcall Yönetim Panelinde oluşturulmuş geçerli bir **API Anahtarı (Personal Access Token)**.
-- Canlı testleri gözlemleyebilmek için tarayıcınızda açık bir **Hipcall Web Telefonu** (temsilci oturumu).
+- Bilgisayarınızda veya sunucunuzda .NET 8 SDK kurulu olmalıdır (`dotnet --version` çıktısı 8.0 veya üstü).
+- Webhook bildirimlerini alabilmek için dışarıdan erişilebilir güvenli bir HTTPS uç noktası (yerel ortamda test etmek için ngrok veya benzeri bir tünel).
+- Hipcall Yönetim Panelinde oluşturulmuş geçerli bir API Anahtarı (Personal Access Token).
+- Canlı testleri gözlemleyebilmek için tarayıcınızda açık bir Hipcall Web Telefonu (temsilci oturumu).
 
 API anahtarınızı terminal oturumunuzda ortam değişkeni olarak tanımlayın:
 
@@ -43,11 +43,11 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 
 Insight Card, temsilcinin web telefonu arayüzünde dikey bir bilgi kartı olarak render edilen satırlardan oluşur. Kart tasarımında üç temel bileşen kullanılır:
 
-| Satır Tipi (`type`) | Zorunlu Alanlar | İsteğe Bağlı Alanlar | İşlevi ve Görünümü |
+| Satır Tipi | Zorunlu Alanlar | İsteğe Bağlı Alanlar | İşlevi ve Görünümü |
 |---|---|---|---|
-| **`title`** | `type`, `text` | `link` | Kartın en üstündeki ana başlıktır. Link tanımlandığında sağında dış bağlantı ikonu yer alır ve tıklandığında CRM kaydını yeni sekmede açar. |
-| **`shortText`** | `type`, `text` | `label`, `link`, `ios`, `android` | İki sütunlu temel veri satırıdır. Sol tarafta soluk gri etiket, sağ tarafta koyu renkli değer görünür. Şirket, bakiye, segment gibi bilgileri taşır. |
-| **`user`** | `type`, `label`, `user_id` | - | Hipcall kullanıcı kimliğini paneldeki temsilcinin adıyla eşleştirerek hesap yöneticisini ekranda gösterir. |
+| `title` | `type`, `text` | `link` | Kartın en üstündeki ana başlıktır. Link tanımlandığında sağında dış bağlantı ikonu yer alır ve tıklandığında CRM kaydını yeni sekmede açar. |
+| `shortText` | `type`, `text` | `label`, `link`, `ios`, `android` | İki sütunlu temel veri satırıdır. Sol tarafta soluk gri etiket, sağ tarafta koyu renkli değer görünür. Şirket, bakiye, segment gibi bilgileri taşır. |
+| `user` | `type`, `label`, `user_id` | - | Hipcall kullanıcı kimliğini paneldeki temsilcinin adıyla eşleştirerek hesap yöneticisini ekranda gösterir. |
 
 Ekrana basılacak zengin ve yapılandırılmış bir kart örneği:
 
@@ -117,7 +117,7 @@ curl -X POST "https://use.hipcall.com.tr/api/v3/calls/{call_id}/cards" \
 
 ![Hipcall Web Telefonunda Insight Card Görünümü](/blog/assets/insight-card-test-page4-1.png)
 
-## Webhook entegrasyonu ve canlı çağrı yaşam döngüsü
+## Webhook entegrasyonu ve çağrı döngüsü
 
 Kartın temsilci telefonu açtığı anda ekranda hazır olması için, çağrının başladığı an tetiklenen `call_init` webhook olayı kullanılır:
 
@@ -162,9 +162,9 @@ Gelen webhook gövdesinde müşteri numarasının konumu çağrının yönüne (
 
 CRM veritabanında eşleşmeyen bir telefon numarası için boş bir kart dizisi (`{"card": []}`) göndermek, temsilcinin ekranında gereksiz gri bir kutu açar. Eşleşme sağlanamadığında hiçbir HTTP isteği gönderilmemeli, arka plan işlemi sessizce sonlandırılmalıdır.
 
-## C# Minimal API ile uçtan uca otomasyon
+## C# Minimal API uygulaması
 
-Aşağıdaki ASP.NET Core Minimal API uygulaması, gelen `call_init` webhook'unu 50 ms altında onaylar, arka planda çağrı yönüne göre numarayı belirler, yerel `customers.json` dosyasından müşteriyi bulur ve Insight Card'ı çağrı oturumuna gönderir:
+Aşağıdaki ASP.NET Core Minimal API uygulaması, gelen `call_init` webhook'unu 50 ms altında onaylar, numarayı belirler, `customers.json` dosyasından müşteriyi bulur ve Insight Card'ı çağrı oturumuna asenkron gönderir. Olası bir hata durumunda API yanıt gövdesini kaybetmemek için konsola loglar.
 
 ```csharp
 using System.Net.Http.Headers;
@@ -220,13 +220,14 @@ app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest requ
         return Results.Ok();
     }
 
-    HipcallWebhookPayload? payload;
+    HipcallWebhookPayload? payload = null;
     try
     {
         payload = JsonSerializer.Deserialize<HipcallWebhookPayload>(rawBody, jsonOptions);
     }
-    catch
+    catch (Exception ex)
     {
+        Console.WriteLine($"Deserialization failed: {ex.Message}");
         return Results.Ok();
     }
 
@@ -292,10 +293,16 @@ app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest requ
             };
             requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            await client.SendAsync(requestMessage);
+            var response = await client.SendAsync(requestMessage);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"API Error: {response.StatusCode} - {errorBody}");
+            }
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Background task failed: {ex.Message}");
         }
     });
 
@@ -391,7 +398,7 @@ public class CallDataPayload
 }
 ```
 
-## Hata aldığınızda ve dikkat edilmesi gerekenler
+## Hata aldığınızda
 
 ### 1. HTTP 422 Unprocessable Entity ve katı şema kuralı
 
@@ -402,15 +409,15 @@ HTTP 422 Unprocessable Entity
 shortText type only allows fields: type, text, label, link, android, ios. Invalid fields found: user_id in card item 2
 ```
 
-**Çözüm:** JSON serileştiricide `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` ayarını mutlaka tanımlayın. Bu sayede kullanılmayan alanlar JSON çıktısından tamamen çıkarılır ve şema ihlali engellenir.
+Çözüm olarak JSON serileştiricide `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` ayarını kullanın. Bu sayede kullanılmayan alanlar JSON çıktısından tamamen çıkarılır.
 
 ### 2. Çağrı kapandıktan sonra kart basılması
 
-Çağrı bittikten sonra API'ye kart gönderildiğinde sistem HTTP `200/201` döner ve kartı çağrı detay geçmişine iliştirir. Ancak çağrı penceresi kapandığı için temsilci bu kartı canlı ekranda göremez. API'nin başarılı dönmesi kartın temsilci tarafından görüldüğü anlamına gelmez; kart canlı görüşme devam ederken iletilmelidir.
+Çağrı bittikten sonra API'ye kart gönderildiğinde sistem HTTP 201 döner ve kartı geçmişe iliştirir. Ancak çağrı penceresi kapandığı için temsilci bu kartı canlı ekranda göremez. Kart canlı görüşme devam ederken iletilmelidir.
 
-### 3. Zamanlama bütçesi (Latency Budget)
+### 3. Gecikme payı (Latency budget)
 
-Telefon çalma süresi genellikle 5 ila 15 saniyedir. Webhook iletimi (~150 ms) ve kart POST isteği (~200 ms) hesaba katıldığında, CRM sorgunuz 2 saniye sürse bile toplam gecikme yaklaşık 2.4 saniyede kalır ve kart telefon açılmadan önce santralde hazır hale gelir. Ancak CRM sorgularının 3-4 saniyeyi aşması kartın görüşme başladıktan sonra ekrana gelmesine yol açabilir; bu nedenle müşteri sorgularının hızlı çalışması kritik önem taşır.
+Telefon çalma süresi genellikle 5 ila 15 saniyedir. Webhook iletimi (~150 ms) ve kart POST isteği (~200 ms) hesaba katıldığında, CRM sorgunuz 2 saniye sürse bile toplam gecikme yaklaşık 2.4 saniyede kalır. CRM sorgularının 3-4 saniyeyi aşması kartın görüşme başladıktan sonra ekrana gelmesine yol açar.
 
 ## Parametre listesi
 
@@ -424,7 +431,7 @@ Insight Card satır tipleri ve desteklenen alanlar:
 
 ## Sonraki adımlar
 
-- Çok sayıda müşteri kaydı için JSON dosyası yerine Redis önbelleği veya PostgreSQL indeksli arama altyapısına geçin.
-- Kendi CRM'inizde bulunmayan numaralar için Hipcall'ın `GET /api/v3/lookup/by_phone` rehber sorgusunu ikincil kaynak (fallback) olarak devreye alın.
-- Mobil temsilciler için `ios` ve `android` deep link parametrelerini tanımlayarak tek dokunuşla yerel CRM uygulamasının açılmasını sağlayın.
-- Entegrasyon deneyimlerinizi veya Insight Card tasarımlarınızı [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.
+- Çok sayıda müşteri kaydı için JSON dosyası yerine Redis önbelleği veya PostgreSQL kullanın.
+- CRM'inizde bulunmayan numaralar için Hipcall'ın `GET /api/v3/lookup/by_phone` sorgusunu ikincil kaynak olarak kullanın.
+- Mobil temsilciler için `ios` ve `android` deep link parametreleri tanımlayarak CRM uygulamasının açılmasını sağlayın.
+- Entegrasyon deneyimlerinizi [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.

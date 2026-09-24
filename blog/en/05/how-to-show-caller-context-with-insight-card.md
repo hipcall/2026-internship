@@ -18,20 +18,20 @@ status: review
 
 ## Overview
 
-When an incoming call rings and the representative's screen displays nothing more than an unfamiliar phone number, the agent scrambles to their CRM tab, copies the number, and waits for customer records to load. That manual search takes roughly fifteen seconds—long after the caller has already started speaking.
+When an incoming call rings and the screen shows only an unfamiliar number, the representative switches to the CRM tab and searches for it. That manual search takes about fifteen seconds. By the time the record loads, the caller has already started speaking.
 
-Insight Card eliminates this fifteen-second blind spot. The moment a call starts, the customer's name, company, open balance, and account owner appear directly inside the web phone interface. The data originates from your own internal database or CRM; Hipcall surfaces it in front of the representative before they answer, creating a personalized experience from the very first second.
+Insight Card removes this delay. The moment a call starts, it displays the customer's name, company, open balance, and account owner inside the web phone. The data comes from your database; Hipcall surfaces it before the agent answers.
 
-In this guide, we use an ASP.NET Core Minimal API to intercept incoming `call_init` webhooks, look up the caller in a local CRM dataset, format structured Insight Card components, and dispatch them to the live call session within safe latency budgets.
+This page covers intercepting `call_init` webhooks with ASP.NET Core Minimal API, looking up the caller in a local CRM, and sending an Insight Card to the active call session.
 
 ## Before you start
 
 Before implementing the integration, make sure you have:
 
-- The **.NET 8 SDK** installed on your workstation or server (`dotnet --version` should output `8.0` or higher).
+- The .NET 8 SDK installed on your workstation or server (`dotnet --version` should output 8.0 or higher).
 - A secure, publicly accessible HTTPS endpoint (such as an ngrok tunnel on port 5080) to receive incoming webhook events.
-- A valid **Personal Access Token** generated in the Hipcall Developer Portal.
-- An active **Hipcall Web Phone** session open in your browser to verify card rendering.
+- A valid Personal Access Token generated in the Hipcall Developer Portal.
+- An active Hipcall Web Phone session open in your browser to verify card rendering.
 
 Set your API token in your terminal environment:
 
@@ -39,15 +39,15 @@ Set your API token in your terminal environment:
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-## Insight Card anatomy and visual components
+## Insight Card structure and visual components
 
 An Insight Card is rendered as a vertical stack of structured rows inside the active call window. Three core row types are supported:
 
-| Row Type (`type`) | Required Fields | Optional Fields | Description |
+| Row Type | Required Fields | Optional Fields | Description |
 |---|---|---|---|
-| **`title`** | `type`, `text` | `link` | The prominent card header. Setting `link` renders an external link icon that opens the CRM record in a new tab. |
-| **`shortText`** | `type`, `text` | `label`, `link`, `ios`, `android` | Standard two-column data item. Displays a muted label on the left and bold text on the right (for company, tier, balance). |
-| **`user`** | `type`, `label`, `user_id` | - | Resolves a Hipcall user ID to display the account owner's full name. |
+| `title` | `type`, `text` | `link` | The prominent card header. Setting `link` renders an external link icon that opens the CRM record in a new tab. |
+| `shortText` | `type`, `text` | `label`, `link`, `ios`, `android` | Standard two-column data item. Displays a muted label on the left and bold text on the right (for company, tier, balance). |
+| `user` | `type`, `label`, `user_id` | - | Resolves a Hipcall user ID to display the account owner's full name. |
 
 Example payload for a structured customer card:
 
@@ -117,7 +117,7 @@ On success, the API returns HTTP `201 Created` and renders the card inside the a
 
 ![Insight Card rendered on Hipcall Web Phone](/blog/assets/insight-card-test-page4-1.png)
 
-## Webhook integration and live call lifecycle
+## Webhook integration and call lifecycle
 
 To ensure the card is ready the moment the representative answers, the pipeline triggers on the `call_init` webhook event:
 
@@ -158,13 +158,13 @@ The location of the target customer number depends on the `direction` parameter:
 - **Inbound calls (`inbound`):** The caller is the external customer. Extract the number from `data.caller_number`.
 - **Outbound calls (`outbound`):** The representative initiates the call. Extract the customer number from `data.callee_number`.
 
-### Completing silently when no customer is found
+### Handling missing customers silently
 
 Hipcall accepts empty card arrays (`{"card": []}`). However, posting an empty card causes the web phone to display an unnecessary blank box. If your database query finds no matching profile, do not send an HTTP request; acknowledge the webhook and complete the execution silently.
 
 ## Complete C# Minimal API implementation
 
-The following ASP.NET Core Minimal API acknowledges incoming `call_init` webhooks within 50 ms, identifies the caller based on direction, queries local customer records, and posts the Insight Card asynchronously:
+The following ASP.NET Core Minimal API acknowledges incoming `call_init` webhooks within 50 ms, identifies the caller, queries local customer records, and posts the Insight Card asynchronously. It also preserves the API error body in case of failure.
 
 ```csharp
 using System.Net.Http.Headers;
@@ -220,13 +220,14 @@ app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest requ
         return Results.Ok();
     }
 
-    HipcallWebhookPayload? payload;
+    HipcallWebhookPayload? payload = null;
     try
     {
         payload = JsonSerializer.Deserialize<HipcallWebhookPayload>(rawBody, jsonOptions);
     }
-    catch
+    catch (Exception ex)
     {
+        Console.WriteLine($"Deserialization failed: {ex.Message}");
         return Results.Ok();
     }
 
@@ -292,10 +293,16 @@ app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest requ
             };
             requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            await client.SendAsync(requestMessage);
+            var response = await client.SendAsync(requestMessage);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"API Error: {response.StatusCode} - {errorBody}");
+            }
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Background task failed: {ex.Message}");
         }
     });
 
@@ -388,26 +395,26 @@ public class CallDataPayload
 }
 ```
 
-## When it fails and implementation pitfalls
+## When it fails
 
-### 1. HTTP 422 Unprocessable Entity and strict schema validation
+### 1. HTTP 422 Unprocessable Entity and strict validation
 
-The Insight Card API enforces strict schema validation on row objects. If attributes not defined for a row type (such as a `user_id` property on a `shortText` row) are included—even with `null` values—the API rejects the entire payload:
+The Insight Card API enforces strict schema validation on row objects. If attributes not defined for a row type (such as a `user_id` property on a `shortText` row) are included—even with `null` values—the API rejects the payload:
 
 ```text
 HTTP 422 Unprocessable Entity
 shortText type only allows fields: type, text, label, link, android, ios. Invalid fields found: user_id in card item 2
 ```
 
-**Resolution:** Always configure your JSON serializer with `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull`. This guarantees unassigned fields are stripped completely from outgoing payloads.
+Configure your JSON serializer with `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull`. This strips unassigned fields from outgoing payloads.
 
 ### 2. Posting cards to terminated calls
 
-If a card request arrives after a call has ended, Hipcall still returns HTTP `200/201` and attaches the card to session history. However, the agent never sees it because the call dialog is closed. A successful HTTP response does not guarantee visual delivery; context must be pushed while the session is alive.
+If a card request arrives after a call ends, Hipcall still returns HTTP 201 and attaches the card to the session history. The agent never sees it because the dialog is closed. Context must be pushed while the session is alive.
 
 ### 3. Latency budget considerations
 
-Telephony ring times typically range from 5 to 15 seconds. Factoring in webhook transit (~150 ms) and the card API request (~200 ms), a 2-second database lookup yields an overall dispatch time of roughly 2.4 seconds, ensuring the card is ready before the representative picks up. However, database lookups exceeding 3 to 4 seconds cause cards to pop up after conversation has already begun, diminishing the user experience.
+Telephony ring times typically range from 5 to 15 seconds. Factoring in webhook transit (~150 ms) and the card API request (~200 ms), a 2-second database lookup yields an overall dispatch time of roughly 2.4 seconds, ensuring the card is ready before the representative picks up. Lookups exceeding 3 to 4 seconds cause cards to pop up after the conversation starts.
 
 ## Parameter reference
 

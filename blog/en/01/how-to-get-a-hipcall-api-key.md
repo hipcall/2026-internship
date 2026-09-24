@@ -1,6 +1,6 @@
 ---
-title: "How to Get a Hipcall API Key and Make Your First Request"
-description: "Generate an API key in the dashboard, make your first authenticated request to the profile endpoint, and inspect the response."
+title: "How to get a Hipcall API key and make your first request"
+description: "Create an API key in the Hipcall dashboard, send your first authenticated request, and read the response."
 slug: how-to-get-a-hipcall-api-key
 lang: en
 locales: [en, tr]
@@ -16,39 +16,35 @@ task: 01
 status: review
 ---
 
-## Overview
+## What this guide covers
 
-The Hipcall API allows you to integrate cloud telephony into your internal systems, CRM platforms, and custom business automations. Through the API, you can originate calls, export call detail records (CDRs), stream caller context to agent screens, and manage telephony routing programmatically.
+The Hipcall API lets you connect your cloud phone system to your own software. You can start calls, pull call records, push caller info to an agent's screen, or change how calls are routed, all through HTTP requests.
 
-In this guide, you will implement the following foundational steps:
-- Generating a Personal Access Token in the dashboard with appropriate role permissions and expiration limits.
-- Storing your token securely in environment variables and passing it via the standard `Authorization: Bearer` header.
-- Querying the `/profile` endpoint to inspect authenticated user context, assigned numbers, and rate limits.
-- Troubleshooting authentication failures (HTTP 401 Unauthorized) and applying production security best practices.
+This page walks you through creating an API key, testing it against the `/profile` endpoint, and handling the most common errors.
 
 ## Before you start
 
-Creating an API key requires a user account with either the **Admin** or **Founder** role. Standard and restricted user roles do not have permission to access developer credentials.
+You need an account with the Admin or Founder role. Other roles cannot reach the developer settings page.
 
-1. Sign in to your Hipcall dashboard at `https://use.hipcall.com/`.
-2. Open **Settings > Developer** in the left sidebar.
-3. Select the **API** tab.
-4. Click the **New** button.
-5. Enter a descriptive **Name** (for example, `CRM Integration`).
-6. Select an **Expiration date** between 1 day and 3 years (the default is 1 year).
-7. Click **Save**.
+1. Sign in at `https://use.hipcall.com/`.
+2. Go to Settings > Developer in the left sidebar.
+3. Open the API tab.
+4. Click New.
+5. Give the key a name that tells you what it is for (for example, `CRM Integration`).
+6. Pick an expiration date. The range is 1 day to 3 years; the default is 1 year.
+7. Click Save.
 
-Immediately upon creation, Hipcall displays the complete raw secret key on your screen. Copy and store this value in a secure password manager before navigating away. For security purposes, the raw token is never shown again; only a masked prefix remains visible in your token list.
+Hipcall shows the full key once, right after you create it. Copy it into a password manager before you leave the page. After that, only a masked version appears in the dashboard.
 
-## Making your first request
+## Send your first request
 
-Store your API key in an environment variable rather than hardcoding it in scripts:
+Store the key in an environment variable instead of pasting it into your code:
 
 ```bash
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 ```
 
-Authentication uses standard HTTP Bearer tokens transmitted via the `Authorization` header. To test connectivity, issue a `GET` request to the `/profile` endpoint:
+The API uses a standard `Authorization: Bearer` header. To check that everything works, send a GET request to `/profile`:
 
 ```bash
 curl -sS -i \
@@ -56,11 +52,9 @@ curl -sS -i \
   https://use.hipcall.com/api/v3/profile
 ```
 
-## Successful response
+## Reading the response
 
-A valid token returns an HTTP `200 OK` status code.
-
-The JSON response provides information regarding the token owner, assigned phone numbers, default Caller ID settings, and account service limits:
+A valid key returns `200 OK`. The JSON body contains the user tied to the key, the phone numbers assigned to them, the default Caller ID, and account limits:
 
 ```json
 {
@@ -109,15 +103,15 @@ The JSON response provides information regarding the token owner, assigned phone
 }
 ```
 
-Response headers contain rate-limiting metrics. Standard developer environments permit **60 requests per minute**.
+The response headers also include rate limit counters. The default limit is 60 requests per minute.
 
-## When it fails
+## When something goes wrong
 
-If an issue occurs during authentication, the API returns HTTP `401 Unauthorized`. The response payload explains the specific reason:
+If the API cannot verify your identity, it returns `401 Unauthorized`. The error message tells you why.
 
-### 1. Missing Authorization header
+### Missing header
 
-Sending a request without the `Authorization` header produces an immediate rejection:
+If you forget the `Authorization` header, you get:
 
 ```json
 {
@@ -127,11 +121,11 @@ Sending a request without the `Authorization` header produces an immediate rejec
 }
 ```
 
-**Resolution:** Confirm that the `Authorization: Bearer <token>` header is present in the request and that your environment variable is loaded.
+Check that your request includes `Authorization: Bearer <token>` and that the environment variable is set.
 
-### 2. Invalid or expired token
+### Invalid or expired key
 
-Supplying a deleted, revoked, or expired token results in a descriptive error:
+If the key has been deleted or has passed its expiration date:
 
 ```json
 {
@@ -141,24 +135,24 @@ Supplying a deleted, revoked, or expired token results in a descriptive error:
 }
 ```
 
-**Resolution:** Inspect token status and expiration dates in the Hipcall dashboard under Settings > Developer > API. Revoke any compromised token and generate a replacement.
+Open Settings > Developer > API in the dashboard and check the key's status. If it is expired or compromised, delete it and create a new one.
 
-## Security best practices
+## Keep your key safe
 
-- Do not commit API credentials to version control systems or embed them into frontend client code.
-- Provide credentials to production applications using environment variables, container secrets, or cloud key vaults.
-- If a secret is exposed, immediately delete the token in the dashboard to invalidate access.
+- Do not commit API keys to version control or put them in frontend code.
+- In production, pass keys through environment variables, Docker secrets, or a cloud key vault.
+- If you think a key has leaked, delete it from the dashboard. The key stops working immediately.
 
 ## Parameter reference
 
-The profile endpoint accepts no query parameters or request body:
+The profile endpoint does not take any query parameters or a request body:
 
 | Parameter | Location | Type | Required | Description |
 |---|---|---|---|---|
-| `Authorization` | Header | string | Yes | Bearer token authentication in the format `Bearer <API_TOKEN>`. |
+| `Authorization` | Header | string | Yes | Bearer token in the format `Bearer <API_TOKEN>`. |
 
 ## Next steps
 
-- Explore interactive endpoint documentation in the [Hipcall API Reference](https://use.hipcall.com/api-docs/).
-- Learn how to filter and export call logs in our call management guides.
-- Connect with other developers in the [Hipcall Community](https://community.hipcall.com/).
+- Try other endpoints in the [Hipcall API Reference](https://use.hipcall.com/api-docs/).
+- Move on to listing and filtering call logs.
+- Ask questions in the [Hipcall Community](https://community.hipcall.com/).
