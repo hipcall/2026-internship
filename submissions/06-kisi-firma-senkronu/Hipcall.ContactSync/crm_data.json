@@ -1,0 +1,44 @@
+[
+  {
+    "customerId": "MUSTERI-CAN-001",
+    "firstName": "Can",
+    "lastName": "Kaya (Güncellendi)",
+    "phone": "+905559998877",
+    "companyId": "4202"
+  },
+  {
+    "customerId": "MUSTERI-AYSE-002",
+    "firstName": "Ayşe",
+    "lastName": "Yılmaz",
+    "phone": "+905554443322",
+    "companyId": "4202"
+  },
+  {
+    "customerId": "MUSTERI-MEHMET-003",
+    "firstName": "Mehmetii",
+    "lastName": "Demir",
+    "phone": "+905557778898",
+    "companyId": "4203"
+  },
+  {
+    "customerId": "MUSTERI-HATA-004",
+    "firstName": "",
+    "lastName": "Hatalı Kayıtii",
+    "phone": "+905550000001",
+    "companyId": "4202"
+  },
+  {
+    "customerId": "MUSTERI-Ekle-007",
+    "firstName": "zişan",
+    "lastName": "zişan",
+    "phone": "+905303422964",
+    "companyId": "4202"
+  },
+  {
+    "customerId": "MUSTERI-Ekle-006",
+    "firstName": "Kaya",
+    "lastName": "Kaya kaya",
+    "phone": "+905303422965",
+    "companyId": "4202"
+  }
+]
