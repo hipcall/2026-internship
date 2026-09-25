@@ -347,12 +347,3 @@ Durum: unchanged
 * **Ekleme & Güncelleme Sonrası Kişi Sayısı:** 23 (Ayşe, Mehmet, Zişan, Kaya başarıyla eklendi, Can ve Mehmet güncellendi)
 * **İkinci Çalıştırma Sonrası Kişi Sayısı:** 23 (Yeni kişi: 0, Güncellenen: 0, Değişmeyen: 5, Hata: 1)
 * **Kanıt:** İkinci çalıştırmada sistem hiçbir mükerrer kayıt üretmemiş, veritabanı durumu birebir korunmuştur. Uygulama tam **idempotenttir**.
-
----
-
-## Bölüm F — Community (Topluluk Paylaşımları)
-
-* **Açılan Tartışma Konusu:**
-  * **Başlık:** *Hipcall API Contact Update Trap: Why PATCH /contacts/{id} Rejects Collections and Requires Sub-endpoints*
-  * **Özet:** REST API tasarımında `POST /contacts` ile ilk kayıtta dizi olarak kabul edilen `phones` ve `emails` alanlarının, güncelleme sırasında `PATCH /contacts/{id}` ana endpoint'i yerine neden izole alt endpoint'ler (`POST /contacts/{id}/phones` ve `DELETE /contacts/{id}/phones/{number}`) üzerinden yönetildiği toplulukta tartışmaya açıldı.
-* **Eski Konular:** Ödev 05 (Insight Card) ile ilgili topluluk konuları çözüldü olarak güncellenip kapatıldı.
