@@ -150,31 +150,31 @@ Senkron, bir JSON dosyasını (CRM dışa aktarımınızı) okur ve her kaydı �
 
 ```mermaid
 flowchart TD
-    Start([CRM kaydını oku]) --> SyncCompany[GET /companies/by-external-id]
-    SyncCompany --> HasCompany{Firma var mı?}
-    HasCompany -- Hayır 404 --> CreateCompany[POST /companies] --> GetCompanyId[Firma ID al]
+    Start(["CRM kaydını oku"]) --> SyncCompany["GET /companies/by-external-id"]
+    SyncCompany --> HasCompany{"Firma var mı?"}
+    HasCompany -- Hayır 404 --> CreateCompany["POST /companies"] --> GetCompanyId["Firma ID al"]
     HasCompany -- Evet 200 --> GetCompanyId
 
-    GetCompanyId --> SearchContact[GET /contacts/by-external-id]
-    SearchContact --> HasContact{Kişi var mı?}
+    GetCompanyId --> SearchContact["GET /contacts/by-external-id"]
+    SearchContact --> HasContact{"Kişi var mı?"}
 
-    HasContact -- Hayır 404 --> CreateContact[POST /contacts]
-    CreateContact --> AddPhone[POST /contacts/{id}/phones]
-    AddPhone --> Created[Durum: created]
+    HasContact -- Hayır 404 --> CreateContact["POST /contacts"]
+    CreateContact --> AddPhone["POST /contacts/{id}/phones"]
+    AddPhone --> Created["Durum: created"]
 
-    HasContact -- Evet 200 --> Compare{Ad veya firma değişti mi?}
-    Compare -- Evet --> Patch[PATCH /contacts/{id}]
+    HasContact -- Evet 200 --> Compare{"Ad veya firma değişti mi?"}
+    Compare -- Evet --> Patch["PATCH /contacts/{id}"]
     Compare -- Hayır --> PhoneCheck
-    Patch --> PhoneCheck{Telefon farklı mı?}
+    Patch --> PhoneCheck{"Telefon farklı mı?"}
 
-    PhoneCheck -- Evet --> ReplacePhone[DELETE eski + POST yeni telefon]
-    PhoneCheck -- Hayır --> AnyChange{Güncelleme yapıldı mı?}
-    ReplacePhone --> Updated[Durum: updated]
+    PhoneCheck -- Evet --> ReplacePhone["DELETE eski + POST yeni telefon"]
+    PhoneCheck -- Hayır --> AnyChange{"Güncelleme yapıldı mı?"}
+    ReplacePhone --> Updated["Durum: updated"]
 
     AnyChange -- Evet --> Updated
-    AnyChange -- Hayır --> Unchanged[Durum: unchanged]
+    AnyChange -- Hayır --> Unchanged["Durum: unchanged"]
 
-    Created --> Next([Sonraki kayıt])
+    Created --> Next(["Sonraki kayıt"])
     Updated --> Next
     Unchanged --> Next
 ```

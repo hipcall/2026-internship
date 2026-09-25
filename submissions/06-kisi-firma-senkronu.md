@@ -235,32 +235,32 @@ Geliştirilen `Hipcall.ContactSync` konsol uygulamasının mimari akış şemas�
 
 ```mermaid
 flowchart TD
-    Start([CRM Kaydını Oku]) --> SyncCompany[Firma Sorgula: GET /companies/by-external-id]
-    SyncCompany --> HasCompany{Firma Var mı?}
-    HasCompany -- Hayır (404) --> CreateCompany[POST /companies ile Firma Oluştur] --> GetCompanyId[Firma ID Al]
+    Start(["CRM Kaydını Oku"]) --> SyncCompany["Firma Sorgula: GET /companies/by-external-id"]
+    SyncCompany --> HasCompany{"Firma Var mı?"}
+    HasCompany -- Hayır (404) --> CreateCompany["POST /companies ile Firma Oluştur"] --> GetCompanyId["Firma ID Al"]
     HasCompany -- Evet (200) --> GetCompanyId
     
-    GetCompanyId --> SearchContact[Kişi Sorgula: GET /contacts/by-external-id]
-    SearchContact --> HasContact{Kişi Var mı?}
+    GetCompanyId --> SearchContact["Kişi Sorgula: GET /contacts/by-external-id"]
+    SearchContact --> HasContact{"Kişi Var mı?"}
     
     HasContact -- Hayır (404) --> CreateContact["POST /contacts ile Kişi Oluştur"]
     CreateContact --> AddPhoneCreate["POST /contacts/{id}/phones ile Telefon Ekle"]
-    AddPhoneCreate --> CreatedStatus[Durum: created]
+    AddPhoneCreate --> CreatedStatus["Durum: created"]
     
-    HasContact -- Evet (200) --> CompareFields{Ad, Soyad veya Şirket Değişti mi?}
+    HasContact -- Evet (200) --> CompareFields{"Ad, Soyad veya Şirket Değişti mi?"}
     CompareFields -- Evet --> PatchContact["PATCH /contacts/{id} ile Skaler Alanları Güncelle"]
     CompareFields -- Hayır --> CheckPhone
-    PatchContact --> CheckPhone{Telefon Numarası Farklı mı?}
+    PatchContact --> CheckPhone{"Telefon Numarası Farklı mı?"}
     
     CheckPhone -- Evet --> ReplacePhone["DELETE /phones/{old} + POST /phones/{new}"]
     CheckPhone -- Hayır --> CheckAnyChange
-    ReplacePhone --> UpdatedStatus[Durum: updated]
+    ReplacePhone --> UpdatedStatus["Durum: updated"]
     
-    CheckAnyChange{Herhangi Bir Alan Güncellendi mi?}
+    CheckAnyChange{"Herhangi Bir Alan Güncellendi mi?"}
     CheckAnyChange -- Evet --> UpdatedStatus
-    CheckAnyChange -- Hayır --> UnchangedStatus[Durum: unchanged]
+    CheckAnyChange -- Hayır --> UnchangedStatus["Durum: unchanged"]
     
-    CreatedStatus --> NextRecord([Sonraki Kayda Geç])
+    CreatedStatus --> NextRecord(["Sonraki Kayda Geç"])
     UpdatedStatus --> NextRecord
     UnchangedStatus --> NextRecord
 ```

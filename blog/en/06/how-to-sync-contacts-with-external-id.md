@@ -150,31 +150,31 @@ The sync reads a JSON file (your CRM export) and processes each record through t
 
 ```mermaid
 flowchart TD
-    Start([Read CRM record]) --> SyncCompany[GET /companies/by-external-id]
-    SyncCompany --> HasCompany{Company exists?}
-    HasCompany -- No 404 --> CreateCompany[POST /companies] --> GetCompanyId[Get Hipcall company ID]
+    Start(["Read CRM record"]) --> SyncCompany["GET /companies/by-external-id"]
+    SyncCompany --> HasCompany{"Company exists?"}
+    HasCompany -- No 404 --> CreateCompany["POST /companies"] --> GetCompanyId["Get Hipcall company ID"]
     HasCompany -- Yes 200 --> GetCompanyId
 
-    GetCompanyId --> SearchContact[GET /contacts/by-external-id]
-    SearchContact --> HasContact{Contact exists?}
+    GetCompanyId --> SearchContact["GET /contacts/by-external-id"]
+    SearchContact --> HasContact{"Contact exists?"}
 
-    HasContact -- No 404 --> CreateContact[POST /contacts]
-    CreateContact --> AddPhone[POST /contacts/{id}/phones]
-    AddPhone --> Created[Status: created]
+    HasContact -- No 404 --> CreateContact["POST /contacts"]
+    CreateContact --> AddPhone["POST /contacts/{id}/phones"]
+    AddPhone --> Created["Status: created"]
 
-    HasContact -- Yes 200 --> Compare{Name or company changed?}
-    Compare -- Yes --> Patch[PATCH /contacts/{id}]
+    HasContact -- Yes 200 --> Compare{"Name or company changed?"}
+    Compare -- Yes --> Patch["PATCH /contacts/{id}"]
     Compare -- No --> PhoneCheck
-    Patch --> PhoneCheck{Phone number differs?}
+    Patch --> PhoneCheck{"Phone number differs?"}
 
-    PhoneCheck -- Yes --> ReplacePhone[DELETE old + POST new phone]
-    PhoneCheck -- No --> AnyChange{Any field updated?}
-    ReplacePhone --> Updated[Status: updated]
+    PhoneCheck -- Yes --> ReplacePhone["DELETE old + POST new phone"]
+    PhoneCheck -- No --> AnyChange{"Any field updated?"}
+    ReplacePhone --> Updated["Status: updated"]
 
     AnyChange -- Yes --> Updated
-    AnyChange -- No --> Unchanged[Status: unchanged]
+    AnyChange -- No --> Unchanged["Status: unchanged"]
 
-    Created --> Next([Next record])
+    Created --> Next(["Next record"])
     Updated --> Next
     Unchanged --> Next
 ```
