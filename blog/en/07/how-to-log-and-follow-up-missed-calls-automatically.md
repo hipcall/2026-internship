@@ -135,7 +135,7 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient("HipcallClient", client =>
 {
-    client.BaseAddress = new Uri("https://use.hipcall.com.tr/api/v3/");
+    client.BaseAddress = new Uri("https://use.hipcall.com/api/v3/");
     client.DefaultRequestHeaders.Authorization =
         new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN"));
 });
