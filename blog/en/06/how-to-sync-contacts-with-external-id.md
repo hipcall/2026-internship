@@ -1,6 +1,6 @@
 ---
-title: "How to Sync Contacts Between Your CRM and Hipcall Using external_id"
-description: "Match records with your own IDs instead of phone numbers, and write a sync that can run twice without creating duplicates."
+title: "Synchronize Contacts Between Your CRM and Hipcall Using external_id"
+description: "Match records with your own identifier instead of phone numbers, and write an idempotent synchronization script that never produces duplicates."
 slug: how-to-sync-contacts-with-external-id
 lang: en
 locales: [en, tr]
@@ -18,48 +18,71 @@ status: review
 
 ## Overview
 
-Your CRM's customer ID and Hipcall's contact ID do not have to match. When you set up synchronization between the two systems, you need a shared field to link records.
+The customer ID in your CRM does not have to match the contact ID in Hipcall. When synchronizing data between the two systems, you need a reliable matching field.
 
-Phone-number matching looks straightforward, but number changes and formatting differences between systems can cause matching problems.
+Matching by phone number might seem straightforward, but it leads to mapping failures when numbers change or formats differ.
 
-`external_id` removes this issue. You store your own identifier on the Hipcall record and query by it directly. This page covers creating contacts and companies with your own IDs, handling the update rules that differ between `POST` and `PATCH`, and building an idempotent C# sync that produces no duplicates on repeated runs.
+The `external_id` field solves this. You write your own ID into the Hipcall record and query it directly. This page covers attaching your ID to contact and company records, understanding the strict update differences between `POST` and `PATCH`, and writing an idempotent C# synchronization script.
 
 ## Before you start
 
-Make sure you have these ready:
+Ensure you have the following ready:
 
 - .NET 9 SDK installed (`dotnet --version` should output 9.0 or higher).
-- A valid Personal Access Token from the Hipcall Developer Portal. The token needs permission to create and update contacts and companies.
-- A few test contacts and companies already in your DEMO account, so you can verify both create and update paths.
+- A valid Personal Access Token generated from the Hipcall Management Panel with permissions to create and update contacts and companies.
+- A few test contacts and companies in your DEMO account to verify the creation and update flows.
 
-Set your API token in the terminal:
+Export your API token in your terminal:
 
 ```bash
 export HIPCALL_API_TOKEN="..."
 ```
 
-## Creating a contact with your own ID
+## Creating a contact with your ID
 
-The smallest valid body for `POST /api/v3/contacts` requires one field: `first_name`. Add `external_id` to tag the record with your CRM's identifier:
+The smallest valid payload for `POST /api/v3/contacts` requires a single field: `first_name`. To tag the record with your CRM ID, include `external_id`:
 
 ```bash
 curl -X POST "https://use.hipcall.com/api/v3/contacts" \
   -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "first_name": "Can",
-    "last_name": "Kaya",
-    "external_id": "CUSTOMER-CAN-001",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "external_id": "CUSTOMER-JANE-001",
     "company_id": 80679,
     "phones": [
-      { "country": "GB", "number": "+447700900123" }
+      { "country": "GB", "number": "+44207XXXXXXX" }
     ]
   }'
 ```
 
-The response returns the new record with an internal `id`. Notice that `phones` and `emails` arrays are accepted here during creation.
+On success, the API returns HTTP `201 Created` with the internal `id` alongside your payload. The `phones` and `emails` arrays are accepted during the creation phase:
 
-If you try to create a second contact with the same `external_id`, the API returns `422`:
+```json
+{
+  "data": {
+    "id": 194136,
+    "user": null,
+    "source": null,
+    "external_id": "CUSTOMER-JANE-001",
+    "full_name": null,
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "company": null,
+    "custom_url": null,
+    "linkedin_url": null,
+    "emails": [],
+    "life_cycle": null,
+    "phones": [],
+    "sector": null,
+    "job_title": null,
+    "custom_fields": {}
+  }
+}
+```
+
+If you attempt to create a second contact with the exact same `external_id`, the API returns `422 Unprocessable Entity`:
 
 ```json
 {
@@ -71,51 +94,76 @@ If you try to create a second contact with the same `external_id`, the API retur
 }
 ```
 
-The uniqueness constraint on `external_id` prevents creating multiple contacts with the same ID. This means you can reliably match records through this field during synchronization.
+The uniqueness constraint on the `external_id` field prevents the creation of multiple contacts with the same ID. This ensures reliable matching during synchronization.
 
-## Looking it up by external ID
+## Querying by external_id
 
-Query a contact by your own identifier instead of the Hipcall internal ID:
+Query your own identifier instead of the internal Hipcall ID:
 
 ```bash
-curl -s "https://use.hipcall.com/api/v3/contacts/by-external-id/CUSTOMER-CAN-001" \
+curl -s "https://use.hipcall.com/api/v3/contacts/by-external-id/CUSTOMER-JANE-001" \
   -H "Authorization: Bearer $HIPCALL_API_TOKEN"
 ```
 
-If the record exists, you get `200 OK` with the full contact object. If it does not exist, you get `404 Not Found`. Your sync uses these two responses to decide between create and update.
-
-## Updating: what goes where
-
-The API separates scalar fields from arrays when updating records. Use `PATCH` on the main endpoint to update fields like `first_name`, `last_name`, and `company_id`. Manage phones and emails as sub-resources through their own endpoints.
-
-| Operation | Endpoint | Body format |
-|---|---|---|
-| Update name, company | `PATCH /api/v3/contacts/{id}` | `{ "first_name": "Can", "company_id": 80679 }` |
-| Add phone | `POST /api/v3/contacts/{id}/phones` | `{ "phones": [{ "country": "GB", "number": "+447700900123" }] }` |
-| Remove phone | `DELETE /api/v3/contacts/{id}/phones/%2B447700900123` | (no body) |
-| Add email | `POST /api/v3/contacts/{id}/emails` | `{ "emails": ["name@example.com"] }` |
-| Remove email | `DELETE /api/v3/contacts/{id}/emails/name%40example.com` | (no body) |
-
-Because `POST /api/v3/contacts` accepts `phones` and `emails` arrays during creation, you might expect `PATCH /api/v3/contacts/{id}` to accept them as well. If you include a `phones` array in a `PATCH` request, the API rejects it with a `422 Unprocessable Entity` status and returns `"Unexpected field: phones"`.
-
-A contact can hold up to six phone numbers. Attempting to add a seventh returns `422` with `"Contact already has 6 phone numbers"`. Adding a number that already exists on the contact also returns `422`.
-
-## Custom fields
-
-Custom field definitions are managed in the panel under Settings > Contact Center > Custom Fields. The API references them by `slug`, which is the machine-readable key generated from the field name (for example, `ozel_alan` for a field named "Özel Alan").
-
-Read or write custom fields through the `custom_fields` object:
+If the record exists, the API returns `200 OK` and the complete contact object:
 
 ```json
 {
-  "custom_fields": {
-    "tier": "enterprise",
-    "account_manager": "john.doe"
+  "data": {
+    "id": 194136,
+    "user": null,
+    "source": null,
+    "external_id": "CUSTOMER-JANE-001",
+    "full_name": "Jane Doe",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "company": null,
+    "custom_url": null,
+    "linkedin_url": null,
+    "emails": [],
+    "life_cycle": null,
+    "phones": [],
+    "sector": null,
+    "job_title": null,
+    "custom_fields": {}
   }
 }
 ```
 
-Both `POST` and `PATCH` accept `custom_fields`. If a field is marked as required in the panel and you omit it during creation, the API rejects the request:
+If it does not exist, it returns `404 Not Found`. Your synchronization script will use these two responses to decide whether to create or update the record.
+
+## Updating: field routing and sub-resources
+
+The API separates scalar fields from arrays during update operations. Send a `PATCH` request to the main endpoint to update scalar fields like `first_name`, `last_name`, and `company_id`. Manage phones and emails through their dedicated sub-resource endpoints.
+
+| Operation | Endpoint | Payload Format |
+|---|---|---|
+| Update name, company | `PATCH /api/v3/contacts/{id}` | `{ "first_name": "Jane", "company_id": 80679 }` |
+| Add phone | `POST /api/v3/contacts/{id}/phones` | `{ "phones": [{ "country": "GB", "number": "+44207XXXXXXX" }] }` |
+| Delete phone | `DELETE /api/v3/contacts/{id}/phones/%2B44207XXXXXXX` | (No payload) |
+| Add email | `POST /api/v3/contacts/{id}/emails` | `{ "emails": ["name@company.com"] }` |
+| Delete email | `DELETE /api/v3/contacts/{id}/emails/name%40company.com` | (No payload) |
+
+Because `POST /api/v3/contacts` accepts `phones` and `emails` arrays during creation, you might expect `PATCH /api/v3/contacts/{id}` to accept them as well. However, if you include a `phones` array in a `PATCH` request, the API rejects it and returns `422 Unprocessable Entity` with an `"Unexpected field: phones"` error.
+
+A contact can hold a maximum of six phone numbers. If you try to add a seventh, the API returns `422` with `"Contact already has 6 phone numbers"`. Attempting to add an already existing number also yields a `422` error.
+
+## Custom fields
+
+Manage custom field definitions from Settings > Directory > Custom Fields in the panel. The API accesses these fields via their `slug`. The slug is a machine-readable key derived from the field name (for example, `custom_field` for "Custom Field").
+
+Read and write custom fields through the `custom_fields` object:
+
+```json
+{
+  "custom_fields": {
+    "stage": "startup",
+    "account_manager": "John"
+  }
+}
+```
+
+Both `POST` and `PATCH` accept this object. If a field marked as mandatory in the panel is left blank during creation, the API rejects the request:
 
 ```json
 {
@@ -127,9 +175,9 @@ Both `POST` and `PATCH` accept `custom_fields`. If a field is marked as required
 }
 ```
 
-## Companies and the link between them
+## Companies and linking
 
-Companies follow the same `external_id` pattern. Create a company with your own ID, then link contacts to it via `company_id`:
+Companies use the same `external_id` mechanism. Create a company with your ID, then link contacts to it using `company_id`:
 
 ```bash
 curl -X POST "https://use.hipcall.com/api/v3/companies" \
@@ -138,21 +186,21 @@ curl -X POST "https://use.hipcall.com/api/v3/companies" \
   -d '{ "name": "Acme Ltd.", "external_id": "COMPANY-77" }'
 ```
 
-Look it up with `GET /api/v3/companies/by-external-id/COMPANY-77`, then use the returned `id` as `company_id` when creating or updating a contact.
+Query it with `GET /api/v3/companies/by-external-id/COMPANY-77`, then use the returned `id` as the `company_id` when creating or updating a contact.
 
-If you delete a company, contacts that were linked to it have their `company` field set to `null`. The contacts themselves are not deleted.
+When a company is deleted, the `company` field of its linked contacts is set to `null`. The contact records are not deleted.
 
-The `/assign` sub-endpoint (`PATCH /api/v3/contacts/{id}/assign`) changes the contact owner without requiring full update permissions on the contact record. Send `"assign_to_user_id": null` to remove the assignment.
+The `/assign` sub-endpoint (`PATCH /api/v3/contacts/{id}/assign`) changes the ownership of the contact without requiring full update permissions. You can remove the assignment by sending `"assign_to_user_id": null`.
 
 ## Writing an idempotent sync
 
-The sync reads a JSON file (your CRM export) and processes each record through this decision tree:
+The sync reads a JSON file (your CRM export) and runs every record through this decision tree:
 
 ```mermaid
 flowchart TD
     Start(["Read CRM record"]) --> SyncCompany["GET /companies/by-external-id"]
     SyncCompany --> HasCompany{"Company exists?"}
-    HasCompany -- No 404 --> CreateCompany["POST /companies"] --> GetCompanyId["Get Hipcall company ID"]
+    HasCompany -- No 404 --> CreateCompany["POST /companies"] --> GetCompanyId["Extract Company ID"]
     HasCompany -- Yes 200 --> GetCompanyId
 
     GetCompanyId --> SearchContact["GET /contacts/by-external-id"]
@@ -165,10 +213,10 @@ flowchart TD
     HasContact -- Yes 200 --> Compare{"Name or company changed?"}
     Compare -- Yes --> Patch["PATCH /contacts/{id}"]
     Compare -- No --> PhoneCheck
-    Patch --> PhoneCheck{"Phone number differs?"}
+    Patch --> PhoneCheck{"Phone different?"}
 
     PhoneCheck -- Yes --> ReplacePhone["DELETE old + POST new phone"]
-    PhoneCheck -- No --> AnyChange{"Any field updated?"}
+    PhoneCheck -- No --> AnyChange{"Was updated?"}
     ReplacePhone --> Updated["Status: updated"]
 
     AnyChange -- Yes --> Updated
@@ -179,36 +227,36 @@ flowchart TD
     Unchanged --> Next
 ```
 
-The input file (`crm_data.json`) contains records from your CRM. Each record maps to one contact and optionally one company:
+The input file (`crm_data.json`) contains the CRM records. Each record maps to a contact and optionally a company:
 
 ```json
 [
   {
-    "customerId": "CUSTOMER-CAN-001",
-    "firstName": "Can",
-    "lastName": "Kaya",
-    "phone": "+447700900123",
+    "customerId": "CUSTOMER-JANE-001",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "phone": "+44207XXXXXXX",
     "companyId": "4202"
   },
   {
-    "customerId": "CUSTOMER-AYSE-002",
-    "firstName": "Ayse",
-    "lastName": "Y.",
-    "phone": "+447700900456",
+    "customerId": "CUSTOMER-JOHN-002",
+    "firstName": "John",
+    "lastName": "Smith",
+    "phone": "+44207XXXXXXX",
     "companyId": "4202"
   }
 ]
 ```
 
-## The full example
+## C# Upsert Logic
 
-The complete C# console application is in `submissions/06-kisi-firma-senkronu/Hipcall.ContactSync/`. Here is the core upsert logic for a single contact:
+The core logic of the upsert mechanism for a single contact looks like this in C#:
 
 ```csharp
 var getResp = await client.GetAsync($"contacts/by-external-id/{record.CustomerId}");
 if (getResp.IsSuccessStatusCode)
 {
-    // Contact exists. Compare fields and PATCH if anything changed.
+    // Contact exists. Compare fields and PATCH if different.
     var body = await getResp.Content.ReadFromJsonAsync<HipcallResponse<Contact>>();
     var contact = body?.Data ?? throw new Exception("Empty contact response.");
     contactId = contact.Id;
@@ -223,7 +271,7 @@ if (getResp.IsSuccessStatusCode)
 
     if (patchReq.Count > 0)
     {
-        // Phones and emails are NOT included here. PATCH rejects them.
+        // Phones and emails are EXCLUDED here. PATCH rejects them.
         await client.PatchAsJsonAsync($"contacts/{contactId}", patchReq);
         status = "updated";
     }
@@ -243,7 +291,7 @@ else if (getResp.StatusCode == HttpStatusCode.NotFound)
 }
 ```
 
-Phone numbers are handled separately through the sub-resource endpoint:
+Phone numbers are managed separately through the sub-resource endpoint:
 
 ```csharp
 if (!phoneExists)
@@ -256,47 +304,47 @@ if (!phoneExists)
 }
 ```
 
-Each record prints its result. If a record throws an exception, the sync catches it, logs the error, and continues with the next record:
+The script logs the result for each record. If a record produces an error, the sync logs it and continues to the next record:
 
 ```text
---- Hipcall Contact & Company Sync starting (6 records) ---
+--- Hipcall Contact & Company Sync Initiated (6 records) ---
 
-Processing: [CUSTOMER-CAN-001] Can Kaya
-   [=] No changes (record is current)
+Processing: [CUSTOMER-JANE-001] Jane Doe
+   [=] No changes (Record up to date)
 Status: unchanged
 
-Processing: [CUSTOMER-MEHMET-003] Mehmetii Demir
-   [+] Fields updated: Name ('Mehmeti' -> 'Mehmetii')
+Processing: [CUSTOMER-JOHN-003] Johnn Smith
+   [+] Details updated: Name ('John' -> 'Johnn')
 Status: updated
 
-Processing: [CUSTOMER-ERROR-004]  Invalid Record
-ERROR (CUSTOMER-ERROR-004): Contact creation error: {"errors":{"first_name":["String length is smaller than minLength: 1"]}}
+Processing: [CUSTOMER-ERR-004]  Erroneous Record
+ERROR (CUSTOMER-ERR-004): Contact creation failed: {"errors":{"first_name":["String length is smaller than minLength: 1"]}}
 
 ================ SUMMARY ================
 Summary: 0 created, 1 updated, 4 unchanged, 1 error.
 =========================================
 ```
 
-Running the same data a second time produces no creates and no updates:
+Running the same data a second time produces no creations or updates:
 
 ```text
 Summary: 0 created, 0 updated, 5 unchanged, 1 error.
 ```
 
-Record count before the first run: 21. After the first run: 25. After the second run: 25. No duplicates.
+Contact count before first run: 21. After first run: 25. After second run: 25. Zero duplicates produced.
 
 ## When it fails
 
-| Status code | Error body | Cause | Fix |
+| Status Code | Error Body | Cause | Resolution |
 |---|---|---|---|
-| `422` | `{"errors":{"external_id":["has already been taken"]}}` | You tried to create a contact with an `external_id` that already exists. | Query by `external_id` first and update instead. |
-| `422` | `{"errors":{"phones":["Unexpected field: phones"]}}` | You included `phones` in a `PATCH` request body. | Use `POST /contacts/{id}/phones` to add numbers. |
-| `422` | `{"errors":{"phones":["Contact already has 6 phone numbers"]}}` | The contact reached the six-phone limit. | Remove an old number before adding a new one. |
-| `422` | `{"errors":{"first_name":["String length is smaller than minLength: 1"]}}` | `first_name` was empty or missing. | Validate before sending. `first_name` is required and must have at least one character. |
-| `422` | `{"errors":{"custom_fields":{"tier":["can't be blank"]}}}` | A required custom field was not provided. | Include all required custom fields in the body, or remove the requirement in the panel. |
-| `404` | `{"errors":{"detail":"Not Found"}}` | The `external_id` does not match any record. | This is expected during upsert. Create the record. |
+| `422` | `{"errors":{"external_id":["has already been taken"]}}` | You attempted to create a new contact with an existing `external_id`. | Query by `external_id` first, and update if it exists. |
+| `422` | `{"errors":{"phones":["Unexpected field: phones"]}}` | You included `phones` in the payload of a `PATCH` request. | Use `POST /contacts/{id}/phones` to add numbers. |
+| `422` | `{"errors":{"phones":["Contact already has 6 phone numbers"]}}` | The contact reached the six-phone limit. | Delete an old number before adding a new one. |
+| `422` | `{"errors":{"first_name":["String length is smaller than minLength: 1"]}}` | The `first_name` is empty or missing. | Validate before dispatching. `first_name` is mandatory and must contain at least one character. |
+| `422` | `{"errors":{"custom_fields":{"tier":["can't be blank"]}}}` | A mandatory custom field was not provided. | Include all required custom fields in the payload, or remove the requirement in the panel. |
+| `404` | `{"errors":{"detail":"Not Found"}}` | The `external_id` does not match any record. | This is expected in an upsert flow. Proceed to create the record. |
 
 ## Next steps
 
-- Add email synchronization using the same sub-resource pattern (`POST /contacts/{id}/emails`).
-- Schedule the sync to run on a timer (for example, every hour) and verify that repeated runs produce zero duplicates.
+- Add email synchronization (`POST /contacts/{id}/emails`) using the same sub-resource pattern.
+- Run the sync script on a timer (for example, hourly) and verify that repeated executions produce zero duplicates.

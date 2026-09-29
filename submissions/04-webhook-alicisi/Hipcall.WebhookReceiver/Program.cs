@@ -20,7 +20,8 @@ var jsonOptions = new JsonSerializerOptions
     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_9a8f2e4c1b0d";
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET ortam değişkeni bulunamadı.");
 var baseDir = Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "submissions", "04-webhook-alicisi", "Hipcall.WebhookReceiver"))
     ? Path.Combine(Directory.GetCurrentDirectory(), "submissions", "04-webhook-alicisi", "Hipcall.WebhookReceiver")
     : Directory.GetCurrentDirectory();

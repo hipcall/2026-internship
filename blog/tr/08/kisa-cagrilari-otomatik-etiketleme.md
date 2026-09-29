@@ -20,17 +20,17 @@ status: draft
 
 8 saniye süren ve cevaplanmış bir çağrı raporlarda "başarılı" görünür. Gerçekte 8 saniyede hiçbir iş konuşulmaz. Bu çağrılar yanlış numara, ses gelmemesi veya ajanın hattı erken kapatması gibi sorunlara işaret eder.
 
-Bu kılavuz, webhook üzerinden kısa çağrıları tespit etmeyi ve daha sonra incelenebilmesi için etiketlemeyi açıklar. Ekip liderleri etiketler üzerinden filtreleme yaparak sorunlu çağrıları tek tek aramak zorunda kalmadan bulabilir.
+Ekip liderlerinin sorunlu çağrıları tek tek aramak zorunda kalmaması için kısa çağrıları webhook üzerinden tespit edip etiketleyin.
 
 ## Başlamadan önce
 
 - Aktif bir Hipcall API anahtarı edinin.
 - `call_hangup` webhook olayını karşılayacak altyapıyı kurun.
-- Hipcall panelinde Settings > Call Center > Tags (Ayarlar > Çağrı Merkezi > Etiketler) menüsüne giderek gerekli etiketleri oluşturun. API üzerinden etiket oluşturulmaz, var olan etiketler atanır. Konfigürasyon için etiket ID değerlerini not edin.
+- Hipcall panelinde Ayarlar > Çağrı Merkezi > Etiketler menüsüne giderek gerekli etiketleri oluşturun. API üzerinden etiket oluşturulmaz, var olan etiketler atanır. Konfigürasyon için etiket ID değerlerini not edin.
 
 ## Hangi süre alanını kullanmalısınız?
 
-Çağrı kaydı zamanla ilgili birden fazla alan içerir. Doğru alanı seçmek kritik önem taşır.
+Çağrı kaydı zamanla ilgili birden fazla alan içerir. Doğru alanı seçin. Yanlış alan hatalı rapor üretir.
 
 | Alan | Ölçüm |
 |---|---|
@@ -47,7 +47,7 @@ Gerçek konuşma süresini hesaplamak için `ended_at` ile `bridged_at` zaman da
 
 ## Kim kapattı ve neden önemli?
 
-Kısa çağrıları incelerken hattı kimin kapattığı en değerli bilgidir. Bu bilgiyi `hangup_by` alanından alabilirsiniz.
+Kısa çağrıları incelerken hattı kimin kapattığına bakın. Bu bilgiyi `hangup_by` alanından alabilirsiniz.
 
 - **contact:** Müşteri kapattı. Yanlış numara veya meşguliyet kaynaklı doğal bir düşmedir.
 - **user:** Ajan kapattı. Ajanın yüzüne kapatması veya donanım sorunu anlamına gelir. Kalite yöneticisi için kırmızı alarmdır.
@@ -58,13 +58,29 @@ Kısa çağrıları incelerken hattı kimin kapattığı en değerli bilgidir. B
 
 Çağrıya etiket eklemek için `POST /api/v3/calls/{call_id}/tags` endpoint'ini kullanın. İstek gövdesinde etiketin adını değil, `tag_id` değerini gönderin.
 
-```http
-POST /api/v3/calls/5c1904ed-ea4d-4209-badd-a985caf0c32a/tags
-Authorization: Bearer HIPCALL_API_TOKEN
-Content-Type: application/json
+```csharp
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni bulunamadı.");
 
+client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
+
+var tagBody = new { tag_id = 5635 };
+var tagContent = new StringContent(JsonSerializer.Serialize(tagBody), Encoding.UTF8, "application/json");
+
+var response = await client.PostAsync($"calls/{callUuid}/tags", tagContent);
+```
+
+İşlem başarılı olduğunda API `200 OK` (veya `201 Created`) döner ve atanan etiketin detaylarını verir:
+
+```json
 {
-  "tag_id": 5617
+  "data": {
+    "id": 5635,
+    "name": "test-kisa-cagri-1",
+    "description": "test",
+    "color": "#ef4444",
+    "color_name": "red"
+  }
 }
 ```
 
@@ -72,104 +88,206 @@ Var olmayan bir `tag_id` gönderirseniz API `404 Not Found` döner. Bu endpoint 
 
 ## Adım 2: Webhook kuralları
 
-Eşik değerini ve etiket ID'lerini `appsettings.json` dosyasından okuyun.
+Kuralı işletmeden önce çağrının `bridged_at` ve `ended_at` değerlerine sahip olduğunu doğrulayın, cevapsız çağrıları es geçin.
+
+Uygulamanızı test etmek için aşağıdaki `curl` komutu ile altı saniye konuşulmuş sahte bir `call_hangup` olayını yerel sunucunuza gönderebilirsiniz:
+
+```bash
+curl -X POST http://localhost:5000/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
+  "data": {
+    "credited": false,
+    "team_touch_at": null,
+    "first_touch_duration": 10,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": "2026-09-29T14:13:33Z",
+    "voicemail_url": null,
+    "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": null,
+    "call_duration": 12,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "hangup",
+        "detail": {
+          "hangup_by": "contact"
+        },
+        "timestamp": 1790691215
+      },
+      {
+        "action": "bridge",
+        "detail": {
+          "id": 4200,
+          "type": "user"
+        },
+        "timestamp": 1790691205
+      },
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "outbound",
+    "callee_number": "+90530XXXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": "2026-09-29T14:13:35Z",
+    "missing_call": false,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": 4200,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": "2026-09-29T14:13:33Z",
+    "channel_id": 942,
+    "caller_type": "user",
+    "user_id": 4200,
+    "hangup_by": "contact",
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "record_url": "https://storage.hipcall.com.tr/recordings/...masked...",
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_hangup"
+}'
+```
+
+Eşik değerini ve etiket ID'lerini koda gömmeyin. Dinamik değer kullanmak yeniden derleme yapmadan değişiklik imkanı verir. Bunları `appsettings.json` dosyasından okuyun:
 
 ```json
 {
   "Hipcall": {
     "ShortCallThresholdSeconds": 10,
     "ShortCallAgentTagId": 5618,
-    "ShortCallCustomerTagId": 5617
+    "ShortCallCustomerTagId": 5635
   }
 }
 ```
 
-Eşiği koda gömmeyin. Dinamik değer kullanmak yeniden derleme yapmadan değişiklik imkanı verir. Kuralı işletmeden önce çağrının `bridged_at` değerine sahip olduğunu doğrulayın, cevapsız çağrıları es geçin.
+## Minimal API alıcı örneği
 
-## C# Minimal API uygulaması
-
-Bu uygulama C# kullanır ve kuralı webhook alıcısında değerlendirir.
+Bu ASP.NET Core uygulaması webhook olayını karşılar. Süreleri hesaplar, eşiğin altındaysa kapatan tarafa göre uygun etiketi API'ye gönderir.
 
 ```csharp
-using Hipcall.PostCall.Models;
+using System;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
-public sealed class ShortCallTagRule : IPostCallRule
+var builder = WebApplication.CreateBuilder(args);
+
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni bulunamadı.");
+
+builder.Services.AddHttpClient("HipcallClient", client =>
 {
-    public string RuleName => "ShortCallTagRule";
+    client.BaseAddress = new Uri("https://use.hipcall.com.tr/api/v3/");
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
+});
 
-    private readonly HipcallApiClient _api;
-    private readonly HipcallSettings _settings;
-    private readonly ILogger<ShortCallTagRule> _logger;
+var app = builder.Build();
 
-    public ShortCallTagRule(
-        HipcallApiClient api,
-        IOptions<HipcallSettings> settings,
-        ILogger<ShortCallTagRule> logger)
-    {
-        _api = api;
-        _settings = settings.Value;
-        _logger = logger;
-    }
-
-    public bool Matches(WebhookPayload payload)
-    {
-        if (payload.Data == null) return false;
-        if (payload.Event != "call_hangup") return false;
-        
-        if (payload.Data.IsMissedCall) return false;
-        if (string.IsNullOrEmpty(payload.Data.BridgedAt)) return false;
-
-        return true;
-    }
-
-    public async Task ExecuteAsync(WebhookPayload payload, CancellationToken ct = default)
-    {
-        var call = payload.Data!;
-
-        if (!DateTime.TryParse(call.BridgedAt, out var bridgedAt) || 
-            !DateTime.TryParse(call.EndedAt, out var endedAt))
-        {
-            return;
-        }
-
-        var talkDurationSeconds = (endedAt - bridgedAt).TotalSeconds;
-
-        if (talkDurationSeconds >= _settings.ShortCallThresholdSeconds)
-        {
-            return;
-        }
-
-        int tagId = call.HangupBy == "user" 
-            ? _settings.ShortCallAgentTagId 
-            : _settings.ShortCallCustomerTagId;
-
-        if (tagId == 0) return;
-
-        await _api.AddTagToCallAsync(call.Uuid, tagId, ct);
-    }
-}
-```
-
-`HipcallApiClient` metodunun içeriği:
-
-```csharp
-public async Task<bool> AddTagToCallAsync(string callUuid, int tagId, CancellationToken ct = default)
+var jsonOptions = new JsonSerializerOptions
 {
-    var body = new { tag_id = tagId };
-    var content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json");
+    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    PropertyNameCaseInsensitive = true
+};
 
-    var response = await _http.PostAsync($"calls/{callUuid}/tags", content, ct);
-    if (response.IsSuccessStatusCode)
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET ortam değişkeni bulunamadı.");
+
+app.MapPost("/hipcall/events/{secret?}", async (
+    string? secret,
+    HttpRequest request,
+    IConfiguration config,
+    IHttpClientFactory httpClientFactory,
+    ILogger<Program> logger) =>
+{
+    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
     {
-        return true;
+        return Results.Unauthorized();
     }
 
-    var errorBody = await response.Content.ReadAsStringAsync(ct);
-    _logger.LogError("[Tag] Error {Status}: {Body}", (int)response.StatusCode, errorBody);
-    return false;
-}
+    using var reader = new StreamReader(request.Body, Encoding.UTF8);
+    var rawBody = await reader.ReadToEndAsync();
+    if (string.IsNullOrWhiteSpace(rawBody))
+    {
+        return Results.Ok();
+    }
+
+    var payload = JsonSerializer.Deserialize<WebhookPayload>(rawBody, jsonOptions);
+    if (payload?.Data == null || payload.Event != "call_hangup")
+    {
+        return Results.Ok();
+    }
+
+    var call = payload.Data;
+    
+    if (call.MissingCall || string.IsNullOrEmpty(call.BridgedAt) || string.IsNullOrEmpty(call.EndedAt))
+    {
+        return Results.Ok();
+    }
+
+    if (!DateTime.TryParse(call.BridgedAt, out var bridgedAt) || 
+        !DateTime.TryParse(call.EndedAt, out var endedAt))
+    {
+        return Results.Ok();
+    }
+
+    var thresholdSeconds = config.GetValue<int>("Hipcall:ShortCallThresholdSeconds", 10);
+    var agentTagId = config.GetValue<int>("Hipcall:ShortCallAgentTagId", 5618);
+    var customerTagId = config.GetValue<int>("Hipcall:ShortCallCustomerTagId", 5635);
+
+    var talkDuration = (endedAt - bridgedAt).TotalSeconds;
+
+    if (talkDuration < thresholdSeconds)
+    {
+        _ = Task.Run(async () =>
+        {
+            var tagId = call.HangupBy == "user" ? agentTagId : customerTagId;
+            if (tagId == 0) return;
+
+            var client = httpClientFactory.CreateClient("HipcallClient");
+            var body = new { tag_id = tagId };
+            var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+            try
+            {
+                var response = await client.PostAsync($"calls/{call.Uuid}/tags", content);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    logger.LogError("Etiket eklenemedi: {Uuid}, Hata: {Error}", call.Uuid, err);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Etiket eklenirken hata: {Uuid}", call.Uuid);
+            }
+        });
+    }
+
+    return Results.Ok();
+});
+
+app.Run();
+
+record WebhookPayload(string Event, CallData? Data);
+record CallData(string Uuid, bool MissingCall, string? BridgedAt, string? EndedAt, string? HangupBy);
 ```
 
 ## Hata aldığınızda

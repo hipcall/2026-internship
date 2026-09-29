@@ -20,7 +20,7 @@ status: review
 
 CRM'nizdeki müşteri ID'si ile Hipcall'daki kişi ID'si aynı olmak zorunda değildir. Bu nedenle iki sistem arasında senkronizasyon kurarken ortak bir eşleştirme alanına ihtiyaç duyarsınız.
 
-Telefon numarasıyla eşleştirme basit görünse de numara değişikliği veya farklı formatlarda kayıt gibi durumlarda eşleştirme sorunlarına yol açabilir.
+Telefon numarasıyla eşleştirme sorunsuz görünse de numara değişikliği veya farklı formatlarda kayıt gibi durumlarda eşleştirme hatalarına yol açabilir.
 
 `external_id` bu sorunu ortadan kaldırır. Kendi ID'nizi Hipcall kaydına yazar, doğrudan onunla sorgularsınız. Bu sayfada kişi ve firma kayıtlarına kendi ID'nizi eklemeyi, `POST` ile `PATCH` arasındaki güncelleme farklarını ve tekrar çalıştırıldığında kopya üretmeyen bir C# senkron uygulaması yazmayı anlatıyoruz.
 
@@ -57,7 +57,30 @@ curl -X POST "https://use.hipcall.com.tr/api/v3/contacts" \
   }'
 ```
 
-Cevap dahili bir `id` ile birlikte yeni kaydı döner. `phones` ve `emails` dizileri oluşturma sırasında gövdede kabul edilir.
+Cevap dahili bir `id` ile birlikte yeni kaydı HTTP `201 Created` olarak döner. `phones` ve `emails` dizileri oluşturma sırasında gövdede kabul edilir:
+
+```json
+{
+  "data": {
+    "id": 194136,
+    "user": null,
+    "source": null,
+    "external_id": "MUSTERI-CAN-001",
+    "full_name": null,
+    "first_name": "Can",
+    "last_name": "Kaya",
+    "company": null,
+    "custom_url": null,
+    "linkedin_url": null,
+    "emails": [],
+    "life_cycle": null,
+    "phones": [],
+    "sector": null,
+    "job_title": null,
+    "custom_fields": {}
+  }
+}
+```
 
 Aynı `external_id` ile ikinci bir kişi oluşturmayı denerseniz API `422` döner:
 
@@ -82,7 +105,32 @@ curl -s "https://use.hipcall.com.tr/api/v3/contacts/by-external-id/MUSTERI-CAN-0
   -H "Authorization: Bearer $HIPCALL_API_TOKEN"
 ```
 
-Kayıt varsa `200 OK` ve tam kişi nesnesi döner. Yoksa `404 Not Found` döner. Senkron uygulamanız bu iki cevapla oluştur/güncelle kararı verir.
+Kayıt varsa `200 OK` ve tam kişi nesnesi döner. Ad ve Soyad birleştirilerek `full_name` alanı da hesaplanır:
+
+```json
+{
+  "data": {
+    "id": 194136,
+    "user": null,
+    "source": null,
+    "external_id": "MUSTERI-CAN-001",
+    "full_name": "Can Kaya",
+    "first_name": "Can",
+    "last_name": "Kaya",
+    "company": null,
+    "custom_url": null,
+    "linkedin_url": null,
+    "emails": [],
+    "life_cycle": null,
+    "phones": [],
+    "sector": null,
+    "job_title": null,
+    "custom_fields": {}
+  }
+}
+```
+
+Eğer ilgili kayıt yoksa `404 Not Found` döner. Senkron uygulamanız bu iki cevapla oluştur/güncelle kararı verir.
 
 ## Güncelleme: hangi alan nereye gider
 
@@ -200,9 +248,9 @@ Girdi dosyası (`crm_data.json`) CRM'deki kayıtları içerir. Her kayıt bir ki
 ]
 ```
 
-## Uygulamanın tamamı
+## C# Upsert Mantığı
 
-C# konsol uygulamasının tam kodu `submissions/06-kisi-firma-senkronu/Hipcall.ContactSync/` dizinindedir. Tek bir kişi için upsert mantığının özü şöyledir:
+Tek bir kişi için upsert (güncelle veya oluştur) mantığının özü şöyledir:
 
 ```csharp
 var getResp = await client.GetAsync($"contacts/by-external-id/{record.CustomerId}");
@@ -300,4 +348,3 @@ Aynı veri ikinci kez çalıştırıldığında oluşturma veya güncelleme yap�
 
 - Aynı alt kaynak desenini kullanarak e-posta senkronizasyonu ekleyin (`POST /contacts/{id}/emails`).
 - Senkronu bir zamanlayıcıyla çalıştırın (örneğin saatte bir) ve tekrarlanan çalıştırmaların sıfır kopya ürettiğini doğrulayın.
-

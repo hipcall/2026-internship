@@ -25,10 +25,10 @@ Webhook'lar olayları uygulamanıza anında iletir. Bir çağrı başladığınd
 Üretim ortamına hazır bir webhook alıcısının dört görevi vardır:
 - Zaman aşımını önlemek için 50 milisaniyenin altında HTTP 200 dönmek.
 - Uç noktayı gizli bir rota anahtarıyla korumak.
-- Ağ tekrarlarında veriyi UUID ile tekilleştirmek.
+- Aynı çağrının farklı olaylarını ve mutabakat verilerini UUID ile tekilleştirmek.
 - Sunucu kesintilerini telafi etmek için gece mutabakatı yapmak.
 
-Bu sayfada Hipcall panelinde webhook ayarlamayı, ASP.NET Core Minimal API ile bir alıcı yazmayı ve ses dosyalarını arka planda indirmeyi anlatıyoruz.
+Bu sayfada Hipcall panelinde webhook ayarlamayı, gerçek istekleri incelemeyi ve ASP.NET Core Minimal API ile bir alıcı yazmayı anlatıyoruz.
 
 ## Başlamadan önce
 
@@ -53,70 +53,62 @@ Webhook'u Hipcall panelinden oluşturun:
    - Olaylar: `call_init`, `call_bridged` ve `call_hangup` seçeneklerini işaretleyin.
 4. Kayıtlar sekmesini açın. Hata Ayıklama Modu'nu etkinleştirdiğinizde sistem iki saat boyunca istek gövdelerini ve HTTP yanıtlarını loglar.
 
-## İlk olayı alma
+## Gövde yapısı ve curl testi
 
-Yeni bir ASP.NET Core Minimal API projesi oluşturun:
+Hipcall, istekleri `application/json` olarak gönderir. Paket, bir `event` anahtarı ve çağrı detaylarını barındıran `data` nesnesi içerir.
+
+Terminalinizde aşağıdaki `curl` komutunu çalıştırarak yerel alıcınıza sahte bir Hipcall `call_init` olayı gönderebilirsiniz:
 
 ```bash
-dotnet new web -n Hipcall.WebhookReceiver
-cd Hipcall.WebhookReceiver
-```
-
-Gizli anahtarı doğrulayan ve gövdeyi yazdıran bir alıcı hazırlayın:
-
-```csharp
-using System.Text;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenAnyIP(5080);
-});
-
-var app = builder.Build();
-
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
-
-app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request) =>
-{
-    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
-    {
-        return Results.Unauthorized();
-    }
-
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var body = await reader.ReadToEndAsync();
-    Console.WriteLine($"Webhook başarıyla alındı:\n{body}");
-    return Results.Ok();
-});
-
-app.Run();
-```
-
-Uygulamayı `dotnet run` ile çalıştırıp bir test araması yapın.
-
-### Gövde yapısı
-
-Hipcall, istekleri `application/json` olarak gönderir:
-
-```json
-{
-  "event": "call_hangup",
+curl -X POST http://localhost:5080/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
   "data": {
-    "uuid": "9a266251-d2a3-44fc-b422-9486ddf880c7",
-    "direction": "outbound",
+    "credited": null,
+    "team_touch_at": null,
+    "first_touch_duration": null,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": null,
+    "voicemail_url": null,
     "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": null,
+    "call_duration": null,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "outbound",
     "callee_number": "+90530XXXXXXX",
-    "call_duration": 14,
-    "missing_call": false,
-    "hangup_by": "contact",
-    "record_url": "https://storage.hipcall.com.tr/recordings/1412/2026/09/21/9a266251-d2a3-44fc-b422-9486ddf880c7.mp3?X-Amz-Expires=604800...",
-    "started_at": "2026-09-21T10:37:07Z",
-    "answered_at": "2026-09-21T10:37:07Z",
-    "ended_at": "2026-09-21T10:37:21Z"
-  }
-}
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": null,
+    "missing_call": null,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": null,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": null,
+    "channel_id": 942,
+    "caller_type": null,
+    "user_id": 4200,
+    "hangup_by": null,
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "record_url": null,
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_init"
+}'
 ```
 
 ### İstek başlıklarının incelenmesi
@@ -125,7 +117,7 @@ Gelen HTTP başlıkları şu şekildedir:
 
 ```http
 Host: your-server.example.com
-User-Agent: Hipcall-Webhook/1.0
+User-Agent: mint/1.9.0
 Content-Type: application/json
 Accept-Encoding: gzip
 X-Forwarded-For: 31.192.211.2
@@ -152,7 +144,7 @@ API üzerinden arama başlatıldığında Hipcall telefonu temsilciyi otomatik y
 
 `call_hangup` olayındaki `data.record_url`, 7 gün geçerli geçici bir AWS S3 bağlantısıdır (`X-Amz-Expires=604800`).
 
-Ses dosyasını webhook geldiği anda arka planda indirin ve kurumunuzun kendi depolama alanına kaydedin. Geçici bağlantıyı veritabanına yazıp bırakmayın.
+Ses dosyasını webhook geldiği anda arka planda indirin ve kurumunuzun kendi depolama alanına kaydedin. Geçici bağlantıyı veritabanına yazmayın.
 
 ## Güvenilir mimari tasarımı
 
@@ -166,9 +158,9 @@ flowchart TD
     D --> E["Anında HTTP 200 OK Dön (< 50 ms)"]
 
     subgraph BG ["Arka Plan Asenkron İşleme"]
-        F["calls.json Dosyasına Tekil Kayıt Yaz (Upsert)"]
+        F["Veritabanına Tekil Kayıt Yaz (Upsert)"]
         F --> G{"record_url Var mı?"}
-        G -- "Evet" --> H["MP3 Dosyasını recordings Klasörüne İndir"]
+        G -- "Evet" --> H["MP3 Dosyasını İndir"]
         G -- "Hayır" --> I["Tamamlandı"]
         H --> I
     end
@@ -187,16 +179,16 @@ flowchart TD
 Hipcall yanıtı 15 saniye içinde bekler. Alıcı ses kaydı indirmek için beklerse bağlantı zaman aşımına uğrar.
 
 İşlem sırası:
-1. Gizli anahtarı doğrulayın (1 ms).
+1. Gizli anahtarı doğrulayın.
 2. JSON gövdesini çözün.
 3. Veriyi kuyruğa alın.
 4. Anında HTTP 200 OK dönün (50 ms altı).
-5. Ses indirme ve dosyaya yazma işlemini arka planda yapın.
+5. Ses indirme ve veritabanı işlemlerini arka planda yapın.
 
 ### 2. Tekilleştirme (Idempotency)
 
-Ağ sorunları aynı çağrı olayını tekrar gönderebilir. Veri kirliliğini önlemek için:
-- Tekilleştirme anahtarı olarak sadece `data.uuid` kullanın.
+Aynı çağrıya ait `call_init`, `call_bridged` ve `call_hangup` olayları farklı zamanlarda aynı `uuid`'yi taşıyarak ulaşır. Sisteminiz bunları yeni kayıt olarak değil, mevcut kaydın güncellemeleri olarak işlemelidir. Ayrıca, gece mutabakatı (nightly reconciliation) sırasında API'den günün tüm çağrılarını çektiğinizde, webhook ile zaten kaydedilmiş çağrılar da gelecektir. Veri kirliliğini önlemek için:
+- Tekilleştirme anahtarı olarak `data.uuid` kullanın.
 - Zaman damgası veya telefon numarası üzerinden tekilleştirme yapmayın.
 - Gelen kayıtlarla mevcut kaydı güncelleyin (upsert).
 
@@ -219,170 +211,66 @@ HMAC başlığı olmadığı için alıcı adresinizi korumanız gerekir:
 1. Gizli URL yolu: URL'nizde gizli bir anahtar bulundurun (`/hipcall/events/whsec_live_...`). Anahtar yoksa HTTP 401 Unauthorized dönün.
 2. IP beyaz listesi: Güvenlik duvarınızda (Nginx, Cloudflare) sadece Hipcall çıkış IP adresine (`31.192.211.2`) izin verin.
 
-## Örnek uygulamanın tamamı
+## Minimal API alıcı örneği
 
-Bu ASP.NET Core Minimal API kodu gizli anahtar doğrulaması, tekilleştirilmiş dosya kaydı ve arka planda ses indirme içerir.
+Aşağıdaki ASP.NET Core Minimal API uç noktası, JSON gövdesini ayrıştırır, gizli anahtarı doğrular, işlemi arka plana devredip santrale derhal `200 OK` döner.
 
 ```csharp
-using System.Text;
+using System;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenAnyIP(5080);
-});
-
-builder.Services.AddHttpClient();
-
+builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(5080));
 var app = builder.Build();
+
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET ortam değişkeni bulunamadı.");
 
 var jsonOptions = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    PropertyNameCaseInsensitive = true,
-    WriteIndented = true,
-    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    PropertyNameCaseInsensitive = true
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
-var baseDir = Directory.GetCurrentDirectory();
-var callsFilePath = Path.Combine(baseDir, "calls.json");
-var fileLock = new object();
-
-Dictionary<string, CallRecord> storedCalls = new(StringComparer.OrdinalIgnoreCase);
-
-if (File.Exists(callsFilePath))
-{
-    try
-    {
-        var existingJson = File.ReadAllText(callsFilePath);
-        var existingList = JsonSerializer.Deserialize<List<CallRecord>>(existingJson, jsonOptions);
-        if (existingList != null)
-        {
-            foreach (var call in existingList)
-            {
-                if (!string.IsNullOrEmpty(call.Uuid))
-                {
-                    storedCalls[call.Uuid] = call;
-                }
-            }
-        }
-    }
-    catch
-    {
-    }
-}
-
-app.MapGet("/", () => Results.Ok("Hipcall Webhook Receiver aktif."));
-
-app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request, IHttpClientFactory httpClientFactory) =>
+app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request) =>
 {
     if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
     {
         return Results.Unauthorized();
     }
 
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync();
-
-    if (string.IsNullOrWhiteSpace(rawBody))
-    {
-        return Results.Ok();
-    }
-
     HipcallWebhookPayload? payload;
     try
     {
-        payload = JsonSerializer.Deserialize<HipcallWebhookPayload>(rawBody, jsonOptions);
+        payload = await JsonSerializer.DeserializeAsync<HipcallWebhookPayload>(request.Body, jsonOptions);
     }
     catch
     {
         return Results.Ok();
     }
 
-    if (payload == null || string.IsNullOrEmpty(payload.Event))
+    if (payload?.Data?.Uuid != null)
     {
-        return Results.Ok();
+        // Veritabanı ve ses indirme işlemlerini arka plana devret
+        _ = Task.Run(() => ProcessWebhookAsync(payload.Event, payload.Data.Uuid));
     }
 
-    if (payload.Event != "call_hangup" && payload.Event != "call_init" && payload.Event != "call_bridged")
-    {
-        return Results.Ok();
-    }
-
-    var data = payload.Data;
-    if (data == null || string.IsNullOrEmpty(data.Uuid))
-    {
-        return Results.Ok();
-    }
-
-    lock (fileLock)
-    {
-        var record = new CallRecord
-        {
-            Uuid = data.Uuid,
-            Direction = data.Direction,
-            CallerNumber = CallRecord.MaskNumber(data.CallerNumber),
-            CalleeNumber = CallRecord.MaskNumber(data.CalleeNumber),
-            CallDuration = data.CallDuration,
-            MissingCall = data.MissingCall,
-            HangupBy = data.HangupBy,
-            RecordUrl = data.RecordUrl,
-            StartedAt = data.StartedAt,
-            AnsweredAt = data.AnsweredAt,
-            EndedAt = data.EndedAt,
-            LastEvent = payload.Event,
-            UpdatedAt = DateTime.UtcNow.ToString("o")
-        };
-
-        storedCalls[data.Uuid] = record;
-
-        try
-        {
-            var serialized = JsonSerializer.Serialize(storedCalls.Values.ToList(), jsonOptions);
-            File.WriteAllText(callsFilePath, serialized);
-        }
-        catch
-        {
-        }
-    }
-
-    if (!string.IsNullOrEmpty(data.RecordUrl))
-    {
-        string audioUrl = data.RecordUrl;
-        string callUuid = data.Uuid;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var client = httpClientFactory.CreateClient();
-                for (int attempt = 1; attempt <= 5; attempt++)
-                {
-                    await Task.Delay(attempt == 1 ? 2500 : 3000);
-                    var response = await client.GetAsync(audioUrl);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        string recDir = Path.Combine(baseDir, "recordings");
-                        Directory.CreateDirectory(recDir);
-                        string filePath = Path.Combine(recDir, $"{callUuid}.mp3");
-                        await using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write);
-                        await response.Content.CopyToAsync(fs);
-                        return;
-                    }
-                }
-            }
-            catch
-            {
-            }
-        });
-    }
-
+    // Bekletmeden anında HTTP 200 OK dön
     return Results.Ok();
 });
 
 app.Run();
+
+async Task ProcessWebhookAsync(string? eventName, string uuid)
+{
+    // Tekilleştirme (Idempotency) ve ses indirme kodları buraya gelir
+    Console.WriteLine($"Arka planda işleniyor: {eventName} - {uuid}");
+    await Task.CompletedTask;
+}
 
 public class HipcallWebhookPayload
 {
@@ -397,37 +285,13 @@ public class CallDataPayload
     public string? CallerNumber { get; set; }
     public string? CalleeNumber { get; set; }
     public int? CallDuration { get; set; }
-    public bool? MissingCall { get; set; }
-    public string? MissingCallReason { get; set; }
-    public string? HangupBy { get; set; }
     public string? RecordUrl { get; set; }
-    public string? StartedAt { get; set; }
-    public string? AnsweredAt { get; set; }
-    public string? EndedAt { get; set; }
-}
-
-public class CallRecord
-{
-    public string? Uuid { get; set; }
-    public string? Direction { get; set; }
-    public string? CallerNumber { get; set; }
-    public string? CalleeNumber { get; set; }
-    public int? CallDuration { get; set; }
-    public bool? MissingCall { get; set; }
     public string? HangupBy { get; set; }
-    public string? RecordUrl { get; set; }
-    public string? StartedAt { get; set; }
-    public string? AnsweredAt { get; set; }
-    public string? EndedAt { get; set; }
-    public string? LastEvent { get; set; }
-    public string? UpdatedAt { get; set; }
-
-    public static string? MaskNumber(string? number)
-    {
-        if (string.IsNullOrEmpty(number) || number.Length <= 6)
-            return number;
-        return number[..6] + new string('X', number.Length - 6);
-    }
+    public string? VoicemailId { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? AnsweredAt { get; set; }
+    public DateTime? BridgedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
 }
 ```
 
@@ -451,7 +315,7 @@ Alıcınız bir saat içinde 4 kez başarısız yanıt (200 dışı kod veya 15 
 - Siz tekrar Aktif konuma getirene kadar yeni webhook göndermez.
 - Düzeltmek için paneli açın, durumu Aktif yapıp kaydedin.
 
-Daha fazla bilgi için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasına bakın.
+Daha fazla bilgi için [Hipcall API Referansı](https://use.hipcall.com.tr/api-docs/) sayfasına bakın. Bu kurallar Webkancaları v1 için geçerlidir.
 
 ## Parametre listesi
 
@@ -474,6 +338,6 @@ Daha fazla bilgi için [Hipcall API Referansı](https://use.hipcall.com.tr/api-d
 ## Sonraki adımlar
 
 - HTTP alıcısı ile veritabanı arasına RabbitMQ ekleyin.
-- `calls.json` yerine `uuid` kolonu eşsiz olan bir PostgreSQL veritabanına geçin.
+- PostgreSQL kullanarak `uuid` alanını eşsiz (unique) ayarlayın.
 - Gece mutabakatını `GET /api/v3/calls` ile otomatikleştirin.
 - Sorularınızı [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.

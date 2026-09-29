@@ -1,6 +1,6 @@
 ---
 title: "Insight Card ile Arayan Bilgisini Ekranda Gösterme"
-description: "call_init webhook'u ve Insight Card API ile çağrı başladığı an müşteri verilerini ajanın web telefonu ekranına taşıyın."
+description: "call_init webhook'unu ve Insight Card API'sini kullanarak çağrı başladığı an müşteri verilerini doğrudan web telefonu ekranına basın."
 slug: insight-card-ile-arayan-bilgisini-ekranda-gosterme
 lang: tr
 locales: [en, tr]
@@ -28,12 +28,12 @@ Bu sayfada ASP.NET Core Minimal API ile `call_init` olayını dinlemeyi, numaray
 
 Çalışmaya başlamadan önce şu gereksinimlerin hazır olduğundan emin olun:
 
-- Bilgisayarınızda veya sunucunuzda .NET 8 SDK kurulu olmalıdır (`dotnet --version` çıktısı 8.0 veya üstü).
-- Webhook bildirimlerini alabilmek için dışarıdan erişilebilir güvenli bir HTTPS uç noktası (yerel ortamda test etmek için ngrok veya benzeri bir tünel).
-- Hipcall Yönetim Panelinde oluşturulmuş geçerli bir API Anahtarı (Personal Access Token).
-- Canlı testleri gözlemleyebilmek için tarayıcınızda açık bir Hipcall Web Telefonu (temsilci oturumu).
+- .NET 8 SDK (Çalıştığınız makinede veya sunucuda `dotnet --version` 8.0 veya üstü olmalı).
+- Webhook isteklerini alabilmek için dışarıdan erişilebilir bir HTTPS adresi (Örn: ngrok ile 5080 portunu dışarı açın).
+- Hipcall Geliştirici Portalından alınmış geçerli bir API Anahtarı.
+- Kart görünümünü test edebilmek için tarayıcınızda açık bir Hipcall Web Telefonu oturumu.
 
-API anahtarınızı terminal oturumunuzda ortam değişkeni olarak tanımlayın:
+API anahtarınızı ortam değişkenlerine ekleyin:
 
 ```bash
 export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
@@ -41,28 +41,28 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 
 ## Insight Card yapısı ve görsel bileşenler
 
-Insight Card, temsilcinin web telefonu arayüzünde dikey bir bilgi kartı olarak render edilen satırlardan oluşur. Kart tasarımında üç temel bileşen kullanılır:
+Insight Card, çağrı penceresi içerisinde alt alta dizilmiş satırlardan oluşur. Üç temel satır tipi desteklenir:
 
-| Satır Tipi | Zorunlu Alanlar | İsteğe Bağlı Alanlar | İşlevi ve Görünümü |
+| Satır Tipi | Zorunlu Alanlar | İsteğe Bağlı Alanlar | Açıklama |
 |---|---|---|---|
-| `title` | `type`, `text` | `link` | Kartın en üstündeki ana başlıktır. Link tanımlandığında sağında dış bağlantı ikonu yer alır ve tıklandığında CRM kaydını yeni sekmede açar. |
-| `shortText` | `type`, `text` | `label`, `link`, `ios`, `android` | İki sütunlu temel veri satırıdır. Sol tarafta soluk gri etiket, sağ tarafta koyu renkli değer görünür. Şirket, bakiye, segment gibi bilgileri taşır. |
-| `user` | `type`, `label`, `user_id` | - | Hipcall kullanıcı kimliğini paneldeki temsilcinin adıyla eşleştirerek hesap yöneticisini ekranda gösterir. |
+| `title` | `type`, `text` | `link` | Ana kart başlığı. `link` eklendiğinde sağ tarafında tıklanabilir bir ikon çıkar. |
+| `shortText` | `type`, `text` | `label`, `link`, `ios`, `android` | İki sütunlu standart veri satırı. Solda soluk `label`, sağda koyu `text` görünür (şirket, bakiye vb. için idealdir). |
+| `user` | `type`, `label`, `user_id` | - | Hipcall kullanıcı ID'sini alarak, panodaki temsilcinin gerçek adını ve soyadını karta basar. |
 
-Ekrana basılacak zengin ve yapılandırılmış bir kart örneği:
+Örnek bir müşteri kartının JSON gövdesi:
 
 ```json
 {
   "card": [
     {
       "type": "title",
-      "text": "Mehmet Demir",
+      "text": "Ahmet Y.",
       "link": "https://crm.example.com/customers/102"
     },
     {
       "type": "shortText",
       "label": "Şirket",
-      "text": "Demir Lojistik Ltd.",
+      "text": "Örnek Teknoloji A.Ş.",
       "link": "https://crm.example.com/customers/102"
     },
     {
@@ -77,16 +77,16 @@ Ekrana basılacak zengin ve yapılandırılmış bir kart örneği:
     },
     {
       "type": "user",
-      "label": "Müşteri Yöneticisi",
+      "label": "Hesap Yöneticisi",
       "user_id": 4200
     }
   ]
 }
 ```
 
-## Insight Card API'si ile kart oluşturma
+## REST API üzerinden Insight Card basma
 
-Aktif bir çağrı oturumuna kart göndermek için `/api/v3/calls/{call_id}/cards` endpoint'ine HTTP POST isteği gönderilir:
+Canlı bir çağrıya kart eklemek için `/api/v3/calls/{call_id}/cards` adresine HTTP POST isteği gönderin:
 
 ```bash
 curl -X POST "https://use.hipcall.com.tr/api/v3/calls/{call_id}/cards" \
@@ -96,277 +96,207 @@ curl -X POST "https://use.hipcall.com.tr/api/v3/calls/{call_id}/cards" \
     "card": [
       {
         "type": "title",
-        "text": "Acme CRM Müşteri Kartı",
+        "text": "Acme CRM Müşteri Profili",
         "link": "https://crm.example.com/customer/101"
       },
       {
         "type": "shortText",
         "label": "Müşteri",
-        "text": "Ahmet Yılmaz"
+        "text": "Ahmet Y."
       },
       {
         "type": "shortText",
         "label": "Durum",
-        "text": "VIP - Düzenli Ödeyen"
+        "text": "VIP - Borcu Yok"
       }
     ]
   }'
 ```
 
-İstek başarılı olduğunda API HTTP `201 Created` yanıtı döner ve web telefonu arayüzünde kart kutucuğu belirir:
+İşlem başarılı olduğunda API HTTP `201 Created` döner ve kart temsilcinin web telefonu arayüzünde görünür:
 
 ![Hipcall Web Telefonunda Insight Card Görünümü](/blog/assets/insight-card-test-page4-1.png)
 
-## Webhook entegrasyonu ve çağrı döngüsü
+## Webhook entegrasyonu ve çağrı akışı
 
-Kartın temsilci telefonu açtığı anda ekranda hazır olması için, çağrının başladığı an tetiklenen `call_init` webhook olayı kullanılır:
+Temsilci telefonu yanıtladığı an kartın ekranda hazır olması için sürecin `call_init` olayıyla tetiklenmesi gerekir.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Musteri as Müşteri / Temsilci
-    participant PBX as Hipcall Santrali
-    participant Receiver as Alıcı (ASP.NET Core)
-    participant CRM as CRM Veritabanı
-    participant CardAPI as Cards REST API
-    participant UI as Web Telefonu (Temsilci)
+Terminalinizde aşağıdaki `curl` komutunu çalıştırarak yerel alıcınıza sahte bir Hipcall `call_init` olayı gönderebilirsiniz:
 
-    Musteri->>PBX: Arama Başlatılır
-    PBX->>UI: Çaldırma Sinyali
-    PBX->>Receiver: POST /hipcall/events (call_init)
-    Receiver-->>PBX: 200 OK (< 50 ms)
-    
-    rect rgb(240, 248, 255)
-        Note over Receiver,CRM: Arka Plan Asenkron Görevi
-        Receiver->>Receiver: Çağrı Yönü Analizi (inbound / outbound)
-        Receiver->>CRM: Telefon Numarasını Sorgula
-        alt Müşteri Bulundu
-            CRM-->>Receiver: Müşteri Profili (Ad, Şirket, Bakiye)
-            Receiver->>CardAPI: POST /api/v3/calls/{id}/cards
-            CardAPI-->>UI: Kartı Temsilci Ekranına İlet
-            CardAPI-->>Receiver: 201 Created
-        else Müşteri Bulunamadı
-            Note over Receiver: İstek Gönderilmez (Gereksiz Yük Önleme)
-        end
-    end
+```bash
+curl -X POST http://localhost:5080/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
+  "data": {
+    "credited": null,
+    "team_touch_at": null,
+    "first_touch_duration": null,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": null,
+    "voicemail_url": null,
+    "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": null,
+    "call_duration": null,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "outbound",
+    "callee_number": "+90530XXXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": null,
+    "missing_call": null,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": null,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": null,
+    "channel_id": 942,
+    "caller_type": null,
+    "user_id": 4200,
+    "hangup_by": null,
+    "uuid": "410c92c5-2b61-4dd2-aa75-xxxxxxxxxxxx",
+    "record_url": null,
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_init"
+}'
 ```
 
-### Çağrı yönüne göre numara tespiti
+### Çağrı yönüne göre numara ayıklama
 
-Gelen webhook gövdesinde müşteri numarasının konumu çağrının yönüne (`direction`) bağlıdır:
+Aranan hedefin (müşterinin) hangi alanda yer aldığı `direction` (yön) parametresine bağlıdır:
 
-- **Gelen çağrılarda (`inbound`):** Arayan taraf dışarıdaki müşteri olduğu için aranan numara `data.caller_number` alanındadır.
-- **Giden çağrılarda (`outbound`):** Temsilci dışarıyı aradığı için müşteri numarası `data.callee_number` alanındadır.
+- **Gelen çağrılar (`inbound`):** Arayan taraf dışarıdaki müşteridir. Numarayı `data.caller_number` alanından alın.
+- **Giden çağrılar (`outbound`):** Temsilcinin başlattığı çağrıdır. Müşteri numarası `data.callee_number` alanındadır.
 
-### Müşteri bulunamadığında sessiz tamamlama
+### Müşteri bulunamadığında boş kart basımını engelleme
 
-CRM veritabanında eşleşmeyen bir telefon numarası için boş bir kart dizisi (`{"card": []}`) göndermek, temsilcinin ekranında gereksiz gri bir kutu açar. Eşleşme sağlanamadığında hiçbir HTTP isteği gönderilmemeli, arka plan işlemi sessizce sonlandırılmalıdır.
+Hipcall teknik olarak boş kartları (`{"card": []}`) kabul eder. Ancak boş bir kart basarsanız ajan arayüzünde içi boş, anlamsız bir gri panel belirir. Veritabanınızda eşleşen bir kayıt yoksa API'ye HTTP POST isteği atmayın; webhook isteğini sadece 200 dönerek sessizce bitirin.
 
-## C# Minimal API uygulaması
+## Minimal API alıcı örneği
 
-Aşağıdaki ASP.NET Core Minimal API uygulaması, gelen `call_init` webhook'unu 50 ms altında onaylar, numarayı belirler, `customers.json` dosyasından müşteriyi bulur ve Insight Card'ı çağrı oturumuna asenkron gönderir. Olası bir hata durumunda API yanıt gövdesini kaybetmemek için konsola loglar.
+Bu ASP.NET Core Minimal API uç noktası, gelen `call_init` olayını karşılar, çağrı yönüne göre numarayı bulur ve işlemi arka plana devredip derhal `200 OK` döner.
 
 ```csharp
+using System;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenAnyIP(5080);
-});
-
-var baseEndpoint = Environment.GetEnvironmentVariable("HIPCALL_API_ENDPOINT") ?? "https://use.hipcall.com.tr/api/v3";
-
-builder.Services.AddHttpClient("HipcallClient", client =>
-{
-    client.BaseAddress = new Uri(baseEndpoint.TrimEnd('/') + "/");
-});
-
+builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(5080));
+builder.Services.AddHttpClient();
 var app = builder.Build();
 
 var jsonOptions = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     PropertyNameCaseInsensitive = true,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    WriteIndented = true,
-    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
-var baseDir = Directory.GetCurrentDirectory();
-var customersFilePath = Path.Combine(baseDir, "customers.json");
-
-HashSet<string> processedCalls = [];
-
-app.MapGet("/", () => Results.Ok(new { status = "running", service = "Hipcall.InsightCard" }));
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET ortam değişkeni bulunamadı.");
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni bulunamadı.");
 
 app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request, IHttpClientFactory httpClientFactory) =>
 {
-    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    if (!string.Equals(secret, expectedSecret, StringComparison.Ordinal))
     {
         return Results.Unauthorized();
     }
 
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync();
-
-    if (string.IsNullOrWhiteSpace(rawBody))
-    {
-        return Results.Ok();
-    }
-
-    HipcallWebhookPayload? payload = null;
+    HipcallWebhookPayload? payload;
     try
     {
-        payload = JsonSerializer.Deserialize<HipcallWebhookPayload>(rawBody, jsonOptions);
+        payload = await JsonSerializer.DeserializeAsync<HipcallWebhookPayload>(request.Body, jsonOptions);
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Deserialization failed: {ex.Message}");
-        return Results.Ok();
-    }
-
-    if (payload == null || string.IsNullOrEmpty(payload.Event) || payload.Data == null)
+    catch
     {
         return Results.Ok();
     }
 
-    if (payload.Event != "call_init" && payload.Event != "call_bridged")
+    if (payload?.Event == "call_init" && payload.Data?.Uuid != null)
     {
-        return Results.Ok();
-    }
+        string? targetPhone = string.Equals(payload.Data.Direction, "inbound", StringComparison.OrdinalIgnoreCase)
+            ? payload.Data.CallerNumber
+            : payload.Data.CalleeNumber;
 
-    var data = payload.Data;
-    if (string.IsNullOrEmpty(data.Uuid))
-    {
-        return Results.Ok();
-    }
-
-    lock (processedCalls)
-    {
-        if (processedCalls.Contains(data.Uuid))
+        if (!string.IsNullOrWhiteSpace(targetPhone))
         {
-            return Results.Ok();
+            _ = Task.Run(() => ProcessInsightCardAsync(payload.Data.Uuid, targetPhone, httpClientFactory, apiToken, jsonOptions));
         }
-        processedCalls.Add(data.Uuid);
     }
-
-    string? targetPhoneNumber = string.Equals(data.Direction, "inbound", StringComparison.OrdinalIgnoreCase)
-        ? data.CallerNumber
-        : data.CalleeNumber;
-
-    if (string.IsNullOrWhiteSpace(targetPhoneNumber))
-    {
-        return Results.Ok();
-    }
-
-    var currentCustomers = LoadCustomers(customersFilePath, jsonOptions);
-    var matchedCustomer = FindCustomerByPhone(currentCustomers, targetPhoneNumber);
-    if (matchedCustomer == null)
-    {
-        return Results.Ok();
-    }
-
-    _ = Task.Run(async () =>
-    {
-        try
-        {
-            var token = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN");
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return;
-            }
-
-            var client = httpClientFactory.CreateClient("HipcallClient");
-            var card = BuildInsightCard(matchedCustomer);
-            var cardJson = JsonSerializer.Serialize(card, jsonOptions);
-            using var cardContent = new StringContent(cardJson, Encoding.UTF8, "application/json");
-
-            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"calls/{data.Uuid}/cards")
-            {
-                Content = cardContent
-            };
-            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-            var response = await client.SendAsync(requestMessage);
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"API Error: {response.StatusCode} - {errorBody}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Background task failed: {ex.Message}");
-        }
-    });
 
     return Results.Ok();
 });
 
 app.Run();
 
-static List<CrmCustomer> LoadCustomers(string path, JsonSerializerOptions options)
+async Task ProcessInsightCardAsync(string uuid, string phone, IHttpClientFactory clientFactory, string token, JsonSerializerOptions options)
 {
-    if (!File.Exists(path)) return [];
-    try
+    // Örnek CRM Sorgusu
+    if (phone != "+90530XXXXXXX") return; 
+
+    var cardData = new InsightCardRoot
     {
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<List<CrmCustomer>>(json, options) ?? [];
-    }
-    catch
+        Card =
+        [
+            new InsightCardItem { Type = "title", Text = "Ahmet Y.", Link = "https://crm.example.com/customers/102" },
+            new InsightCardItem { Type = "shortText", Label = "Şirket", Text = "Örnek Teknoloji A.Ş." }
+        ]
+    };
+
+    var client = clientFactory.CreateClient();
+    using var content = new StringContent(JsonSerializer.Serialize(cardData, options), Encoding.UTF8, "application/json");
+    using var req = new HttpRequestMessage(HttpMethod.Post, $"https://use.hipcall.com.tr/api/v3/calls/{uuid}/cards")
     {
-        return [];
-    }
+        Content = content
+    };
+    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+    await client.SendAsync(req);
 }
 
-static CrmCustomer? FindCustomerByPhone(List<CrmCustomer> customers, string phone)
+public class HipcallWebhookPayload
 {
-    var normalizedTarget = NormalizePhone(phone);
-    return customers.FirstOrDefault(c => NormalizePhone(c.Phone) == normalizedTarget);
+    public string? Event { get; set; }
+    public CallDataPayload? Data { get; set; }
 }
 
-static string NormalizePhone(string? phone)
+public class CallDataPayload
 {
-    if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
-    var digits = new string(phone.Where(char.IsDigit).ToArray());
-    if (digits.StartsWith("90") && digits.Length == 12) return digits[2..];
-    if (digits.StartsWith("0") && digits.Length == 11) return digits[1..];
-    return digits;
-}
-
-static InsightCardRoot BuildInsightCard(CrmCustomer customer)
-{
-    List<InsightCardItem> items =
-    [
-        new InsightCardItem { Type = "title", Text = customer.Name, Link = customer.CrmUrl },
-        new InsightCardItem { Type = "shortText", Label = "Şirket", Text = customer.Company, Link = customer.CrmUrl },
-        new InsightCardItem { Type = "shortText", Label = "Segment", Text = customer.Segment },
-        new InsightCardItem { Type = "shortText", Label = "Bakiye", Text = customer.Balance }
-    ];
-
-    if (customer.AccountOwnerId.HasValue)
-    {
-        items.Add(new InsightCardItem { Type = "user", Label = "Müşteri Yöneticisi", UserId = customer.AccountOwnerId.Value });
-    }
-
-    return new InsightCardRoot { Card = items };
-}
-
-public class CrmCustomer
-{
-    public string? Phone { get; set; }
-    public string? Name { get; set; }
-    public string? Company { get; set; }
-    public string? Segment { get; set; }
-    public string? Balance { get; set; }
-    public string? CrmUrl { get; set; }
-    public int? AccountOwnerId { get; set; }
+    public string? Uuid { get; set; }
+    public string? Direction { get; set; }
+    public string? CallerNumber { get; set; }
+    public string? CalleeNumber { get; set; }
+    public int? CallDuration { get; set; }
+    public string? RecordUrl { get; set; }
+    public string? HangupBy { get; set; }
+    public string? VoicemailId { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? AnsweredAt { get; set; }
+    public DateTime? BridgedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
 }
 
 public class InsightCardRoot
@@ -382,56 +312,42 @@ public class InsightCardItem
     public string? Link { get; set; }
     public int? UserId { get; set; }
 }
-
-public class HipcallWebhookPayload
-{
-    public string? Event { get; set; }
-    public CallDataPayload? Data { get; set; }
-}
-
-public class CallDataPayload
-{
-    public string? Uuid { get; set; }
-    public string? Direction { get; set; }
-    public string? CallerNumber { get; set; }
-    public string? CalleeNumber { get; set; }
-}
 ```
 
 ## Hata aldığınızda
 
-### 1. HTTP 422 Unprocessable Entity ve katı şema kuralı
+### 1. HTTP 422 Unprocessable Entity ve katı şema doğrulaması
 
-Hipcall Insight Card API'si satır nesnelerinde tanımlı olmayan yabancı alanlara karşı katı doğrulama uygular. Örneğin `shortText` tipindeki bir satıra C# modelinde tanımlı olan `user_id` alanı `null` olarak dahi serileştirilirse API tüm kartı reddeder:
+Insight Card API'si çok katı bir şema (schema) kullanır. Örneğin `shortText` satırına `user_id` alanı gönderirseniz (değeri `null` bile olsa), API isteği reddeder:
 
 ```text
 HTTP 422 Unprocessable Entity
 shortText type only allows fields: type, text, label, link, android, ios. Invalid fields found: user_id in card item 2
 ```
 
-Çözüm olarak JSON serileştiricide `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` ayarını kullanın. Bu sayede kullanılmayan alanlar JSON çıktısından tamamen çıkarılır.
+C# nesnelerinizi serileştirirken JSON ayarlarına `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull` ekleyin. Bu ayar, içi boş olan özelliklerin JSON gövdesine yazılmasını engeller.
 
-### 2. Çağrı kapandıktan sonra kart basılması
+### 2. Çağrı bittikten sonra kart yollamak
 
-Çağrı bittikten sonra API'ye kart gönderildiğinde sistem HTTP 201 döner ve kartı geçmişe iliştirir. Ancak çağrı penceresi kapandığı için temsilci bu kartı canlı ekranda göremez. Kart canlı görüşme devam ederken iletilmelidir.
+Gecikmeli bir API isteği atarsanız ve çağrı o sırada kapanmışsa, Hipcall kartı kabul eder ve veritabanına işler (`201 Created` döner). Ancak ekran kapanmış olduğu için ajan kartı göremez.
 
-### 3. Gecikme payı (Latency budget)
+### 3. Süre bütçesi (Latency)
 
-Telefon çalma süresi genellikle 5 ila 15 saniyedir. Webhook iletimi (~150 ms) ve kart POST isteği (~200 ms) hesaba katıldığında, CRM sorgunuz 2 saniye sürse bile toplam gecikme yaklaşık 2.4 saniyede kalır. CRM sorgularının 3-4 saniyeyi aşması kartın görüşme başladıktan sonra ekrana gelmesine yol açar.
+Ortalama bir telefon 5-15 saniye çalar. Webhook ağ süresi (~150 ms) ve kart basım süresi (~200 ms) düşüldüğünde, kendi veritabanınızda 2 saniyelik bir sorgu yapmanız son derece güvenlidir. Ancak CRM sorgunuz 3-4 saniyeyi aşıyorsa kartlar ancak temsilci telefonu açtıktan sonra ekrana düşer.
 
 ## Parametre listesi
 
-Insight Card satır tipleri ve desteklenen alanlar:
+Desteklenen satır tipleri ve izin verilen alanlar:
 
 | Satır Tipi | Desteklenen Alanlar | Açıklama |
 |---|---|---|
-| `title` | `type`, `text`, `link` | Kart başlığı ve tıklandığında açılacak CRM bağlantısı. |
-| `shortText` | `type`, `text`, `label`, `link`, `ios`, `android` | Etiket-değer ikilisi, harici web bağlantısı veya mobil deep link. |
-| `user` | `type`, `label`, `user_id` | Hipcall kullanıcı ID'si üzerinden hesap yöneticisi gösterimi. |
+| `title` | `type`, `text`, `link` | Tıklanabilir bağlantıya sahip ana başlık satırı. |
+| `shortText` | `type`, `text`, `label`, `link`, `ios`, `android` | Veri çiftleri, web bağlantıları veya mobil uygulama linkleri (deep link). |
+| `user` | `type`, `label`, `user_id` | Hipcall kullanıcı kimliğini alıp personel adını basar. |
 
 ## Sonraki adımlar
 
-- Çok sayıda müşteri kaydı için JSON dosyası yerine Redis önbelleği veya PostgreSQL kullanın.
-- CRM'inizde bulunmayan numaralar için Hipcall'ın `GET /api/v3/lookup/by_phone` sorgusunu ikincil kaynak olarak kullanın.
-- Mobil temsilciler için `ios` ve `android` deep link parametreleri tanımlayarak CRM uygulamasının açılmasını sağlayın.
-- Entegrasyon deneyimlerinizi [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.
+- Hızlı aramalar için PostgreSQL veritabanı veya Redis önbellek (cache) mimarisine geçiş yapın.
+- Arayan müşteri kendi CRM sisteminizde bulunmadığında ikinci (fallback) adım olarak Hipcall `GET /api/v3/lookup/by_phone` metodunu sorgulayın.
+- Mobil cihazdan çalışan temsilcilerin kendi şirket uygulamanıza doğrudan geçiş yapması için `ios` ve `android` link yapılandırmalarını (deep link) karta ekleyin.
+- Sorularınızı [Hipcall Topluluk](https://community.hipcall.com/) platformunda paylaşın.

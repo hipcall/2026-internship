@@ -73,7 +73,7 @@ Example payload for a structured customer card:
     {
       "type": "shortText",
       "label": "Balance",
-      "text": "$14,250 (Open Invoice)"
+      "text": "£14,250 (Open Invoice)"
     },
     {
       "type": "user",
@@ -119,36 +119,60 @@ On success, the API returns HTTP `201 Created` and renders the card inside the a
 
 ## Webhook integration and call lifecycle
 
-To ensure the card is ready the moment the representative answers, the pipeline triggers on the `call_init` webhook event:
+To ensure the card is ready the moment the representative answers, the pipeline triggers on the `call_init` webhook event.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Caller as Customer / Representative
-    participant PBX as Hipcall PBX
-    participant Receiver as Receiver (ASP.NET Core)
-    participant CRM as Customer Database
-    participant CardAPI as Cards REST API
-    participant UI as Web Phone (Representative)
+You can simulate a Hipcall `call_init` event locally using `curl`:
 
-    Caller->>PBX: Call Initiated
-    PBX->>UI: Ringing Signal
-    PBX->>Receiver: POST /hipcall/events (call_init)
-    Receiver-->>PBX: 200 OK (< 50 ms)
-    
-    rect rgb(240, 248, 255)
-        Note over Receiver,CRM: Background Asynchronous Task
-        Receiver->>Receiver: Extract Number (Inbound vs Outbound)
-        Receiver->>CRM: Lookup Phone Number
-        alt Customer Found
-            CRM-->>Receiver: Customer Details (Name, Company, Balance)
-            Receiver->>CardAPI: POST /api/v3/calls/{id}/cards
-            CardAPI-->>UI: Render Insight Card on Screen
-            CardAPI-->>Receiver: 201 Created
-        else Customer Not Found
-            Note over Receiver: Do Nothing (Prevent Empty Cards)
-        end
-    end
+```bash
+curl -X POST http://localhost:5080/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
+  "data": {
+    "credited": null,
+    "team_touch_at": null,
+    "first_touch_duration": null,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": null,
+    "voicemail_url": null,
+    "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": null,
+    "call_duration": null,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "outbound",
+    "callee_number": "+90530XXXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": null,
+    "missing_call": null,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": null,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": null,
+    "channel_id": 942,
+    "caller_type": null,
+    "user_id": 4200,
+    "hangup_by": null,
+    "uuid": "410c92c5-2b61-4dd2-aa75-xxxxxxxxxxxx",
+    "record_url": null,
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_init"
+}'
 ```
 
 ### Determining the customer number by call direction
@@ -162,222 +186,95 @@ The location of the target customer number depends on the `direction` parameter:
 
 Hipcall accepts empty card arrays (`{"card": []}`). However, posting an empty card causes the web phone to display an unnecessary blank box. If your database query finds no matching profile, do not send an HTTP request; acknowledge the webhook and complete the execution silently.
 
-## Complete C# Minimal API implementation
+## Minimal API receiver example
 
-The following ASP.NET Core Minimal API acknowledges incoming `call_init` webhooks within 50 ms, identifies the caller, queries local customer records, and posts the Insight Card asynchronously. It also preserves the API error body in case of failure.
+The following ASP.NET Core Minimal API acknowledges incoming `call_init` webhooks within 50 ms, identifies the caller, and pushes card generation to a background task to prevent webhook timeouts.
 
 ```csharp
+using System;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenAnyIP(5080);
-});
-
-var baseEndpoint = Environment.GetEnvironmentVariable("HIPCALL_API_ENDPOINT") ?? "https://use.hipcall.com/api/v3";
-
-builder.Services.AddHttpClient("HipcallClient", client =>
-{
-    client.BaseAddress = new Uri(baseEndpoint.TrimEnd('/') + "/");
-});
-
+builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(5080));
+builder.Services.AddHttpClient();
 var app = builder.Build();
 
 var jsonOptions = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     PropertyNameCaseInsensitive = true,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    WriteIndented = true,
-    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
-var baseDir = Directory.GetCurrentDirectory();
-var customersFilePath = Path.Combine(baseDir, "customers.json");
-
-HashSet<string> processedCalls = [];
-
-app.MapGet("/", () => Results.Ok(new { status = "running", service = "Hipcall.InsightCard" }));
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET environment variable is missing.");
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN environment variable is missing.");
 
 app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request, IHttpClientFactory httpClientFactory) =>
 {
-    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    if (!string.Equals(secret, expectedSecret, StringComparison.Ordinal))
     {
         return Results.Unauthorized();
     }
 
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync();
-
-    if (string.IsNullOrWhiteSpace(rawBody))
-    {
-        return Results.Ok();
-    }
-
-    HipcallWebhookPayload? payload = null;
+    HipcallWebhookPayload? payload;
     try
     {
-        payload = JsonSerializer.Deserialize<HipcallWebhookPayload>(rawBody, jsonOptions);
+        payload = await JsonSerializer.DeserializeAsync<HipcallWebhookPayload>(request.Body, jsonOptions);
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Deserialization failed: {ex.Message}");
-        return Results.Ok();
-    }
-
-    if (payload == null || string.IsNullOrEmpty(payload.Event) || payload.Data == null)
+    catch
     {
         return Results.Ok();
     }
 
-    if (payload.Event != "call_init" && payload.Event != "call_bridged")
+    if (payload?.Event == "call_init" && payload.Data?.Uuid != null)
     {
-        return Results.Ok();
-    }
+        string? targetPhone = string.Equals(payload.Data.Direction, "inbound", StringComparison.OrdinalIgnoreCase)
+            ? payload.Data.CallerNumber
+            : payload.Data.CalleeNumber;
 
-    var data = payload.Data;
-    if (string.IsNullOrEmpty(data.Uuid))
-    {
-        return Results.Ok();
-    }
-
-    lock (processedCalls)
-    {
-        if (processedCalls.Contains(data.Uuid))
+        if (!string.IsNullOrWhiteSpace(targetPhone))
         {
-            return Results.Ok();
+            _ = Task.Run(() => ProcessInsightCardAsync(payload.Data.Uuid, targetPhone, httpClientFactory, apiToken, jsonOptions));
         }
-        processedCalls.Add(data.Uuid);
     }
-
-    string? targetPhoneNumber = string.Equals(data.Direction, "inbound", StringComparison.OrdinalIgnoreCase)
-        ? data.CallerNumber
-        : data.CalleeNumber;
-
-    if (string.IsNullOrWhiteSpace(targetPhoneNumber))
-    {
-        return Results.Ok();
-    }
-
-    var currentCustomers = LoadCustomers(customersFilePath, jsonOptions);
-    var matchedCustomer = FindCustomerByPhone(currentCustomers, targetPhoneNumber);
-    if (matchedCustomer == null)
-    {
-        return Results.Ok();
-    }
-
-    _ = Task.Run(async () =>
-    {
-        try
-        {
-            var token = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN");
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return;
-            }
-
-            var client = httpClientFactory.CreateClient("HipcallClient");
-            var card = BuildInsightCard(matchedCustomer);
-            var cardJson = JsonSerializer.Serialize(card, jsonOptions);
-            using var cardContent = new StringContent(cardJson, Encoding.UTF8, "application/json");
-
-            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"calls/{data.Uuid}/cards")
-            {
-                Content = cardContent
-            };
-            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-            var response = await client.SendAsync(requestMessage);
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"API Error: {response.StatusCode} - {errorBody}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Background task failed: {ex.Message}");
-        }
-    });
 
     return Results.Ok();
 });
 
 app.Run();
 
-static List<CrmCustomer> LoadCustomers(string path, JsonSerializerOptions options)
+async Task ProcessInsightCardAsync(string uuid, string phone, IHttpClientFactory clientFactory, string token, JsonSerializerOptions options)
 {
-    if (!File.Exists(path)) return [];
-    try
+    // Simulate CRM lookup
+    if (phone != "+442079460123") return; 
+
+    var cardData = new InsightCardRoot
     {
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<List<CrmCustomer>>(json, options) ?? [];
-    }
-    catch
+        Card =
+        [
+            new InsightCardItem { Type = "title", Text = "Jane Doe", Link = "https://crm.example.com/customers/102" },
+            new InsightCardItem { Type = "shortText", Label = "Company", Text = "Acme Global Ltd." }
+        ]
+    };
+
+    var client = clientFactory.CreateClient();
+    using var content = new StringContent(JsonSerializer.Serialize(cardData, options), Encoding.UTF8, "application/json");
+    using var req = new HttpRequestMessage(HttpMethod.Post, $"https://use.hipcall.com/api/v3/calls/{uuid}/cards")
     {
-        return [];
-    }
-}
+        Content = content
+    };
+    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-static CrmCustomer? FindCustomerByPhone(List<CrmCustomer> customers, string phone)
-{
-    var normalizedTarget = NormalizePhone(phone);
-    return customers.FirstOrDefault(c => NormalizePhone(c.Phone) == normalizedTarget);
-}
-
-static string NormalizePhone(string? phone)
-{
-    if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
-    return new string(phone.Where(char.IsDigit).ToArray());
-}
-
-static InsightCardRoot BuildInsightCard(CrmCustomer customer)
-{
-    List<InsightCardItem> items =
-    [
-        new InsightCardItem { Type = "title", Text = customer.Name, Link = customer.CrmUrl },
-        new InsightCardItem { Type = "shortText", Label = "Company", Text = customer.Company, Link = customer.CrmUrl },
-        new InsightCardItem { Type = "shortText", Label = "Segment", Text = customer.Segment },
-        new InsightCardItem { Type = "shortText", Label = "Balance", Text = customer.Balance }
-    ];
-
-    if (customer.AccountOwnerId.HasValue)
-    {
-        items.Add(new InsightCardItem { Type = "user", Label = "Account Owner", UserId = customer.AccountOwnerId.Value });
-    }
-
-    return new InsightCardRoot { Card = items };
-}
-
-public class CrmCustomer
-{
-    public string? Phone { get; set; }
-    public string? Name { get; set; }
-    public string? Company { get; set; }
-    public string? Segment { get; set; }
-    public string? Balance { get; set; }
-    public string? CrmUrl { get; set; }
-    public int? AccountOwnerId { get; set; }
-}
-
-public class InsightCardRoot
-{
-    public List<InsightCardItem> Card { get; set; } = [];
-}
-
-public class InsightCardItem
-{
-    public string Type { get; set; } = "shortText";
-    public string? Label { get; set; }
-    public string? Text { get; set; }
-    public string? Link { get; set; }
-    public int? UserId { get; set; }
+    await client.SendAsync(req);
 }
 
 public class HipcallWebhookPayload
@@ -392,6 +289,28 @@ public class CallDataPayload
     public string? Direction { get; set; }
     public string? CallerNumber { get; set; }
     public string? CalleeNumber { get; set; }
+    public int? CallDuration { get; set; }
+    public string? RecordUrl { get; set; }
+    public string? HangupBy { get; set; }
+    public string? VoicemailId { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? AnsweredAt { get; set; }
+    public DateTime? BridgedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
+}
+
+public class InsightCardRoot
+{
+    public List<InsightCardItem> Card { get; set; } = [];
+}
+
+public class InsightCardItem
+{
+    public string Type { get; set; } = "shortText";
+    public string? Label { get; set; }
+    public string? Text { get; set; }
+    public string? Link { get; set; }
+    public int? UserId { get; set; }
 }
 ```
 
@@ -428,7 +347,7 @@ Supported Insight Card row types and their allowed attributes:
 
 ## Next steps
 
-- Transition from JSON file storage to an indexed PostgreSQL database or Redis cache for large customer datasets.
+- Transition from local memory lookups to an indexed PostgreSQL database or Redis cache for large customer datasets.
 - Use Hipcall's `GET /api/v3/lookup/by_phone` endpoint as a fallback data source when an incoming caller does not match records in your primary CRM.
 - Add `ios` and `android` deep link schemes to customer cards to let mobile agents open native CRM records directly.
 - Share your integration feedback or custom Insight Card designs in the [Hipcall Community](https://community.hipcall.com/).

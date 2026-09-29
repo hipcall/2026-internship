@@ -1,6 +1,6 @@
 ---
 title: "Cevapsız çağrıları Hipcall API ile dışarı aktarma"
-description: "Cevapsız çağrıları tarih ve duruma göre filtreleyin, tüm sayfaları dolaşın ve C# betiğiyle CSV dosyasına aktarın."
+description: "Cevapsız çağrıları tarih ve duruma göre filtreleyin, tüm sayfaları dolaşın ve JSON verisini C# ile işleyin."
 slug: cevapsiz-cagrilari-hipcall-api-ile-disari-aktarma
 lang: tr
 locales: [en, tr]
@@ -18,9 +18,9 @@ status: review
 
 ## Genel bakış
 
-Çağrı merkezlerinde cevapsız çağrılar hızla birikir. Yönetim panelinden rapor indirmek anlık incelemeler için yeterlidir, ancak CRM uygulamanız bu kayıtlara her sabah ihtiyaç duyuyorsa kendi başına çalışan bir araç gerekir.
+Çağrı merkezlerinde cevapsız çağrılar birikir. Yönetim panelinden rapor indirmek mümkündür, ancak CRM uygulamanız bu kayıtlara her sabah ihtiyaç duyuyorsa kendi başına çalışan bir araç gerekir.
 
-Hipcall API, çağrı kayıtlarını filtrelemenize ve tüm sayfaları dolaşmanıza olanak tanır. Bu rehberde cevapsız çağrıları çekmeyi, tüm sayfaları okumayı ve bir C# betiğiyle CSV dosyasına yazmayı anlatıyoruz.
+Hipcall API, çağrı kayıtlarını filtrelemenize ve tüm sayfaları dolaşmanıza olanak tanır. Bu rehberde cevapsız çağrıları çekmeyi, tüm sayfaları okumayı ve JSON verisini bir C# kodu ile işlemeyi anlatıyoruz.
 
 ## Başlamadan önce
 
@@ -41,7 +41,7 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 Hipcall listeleme endpoint'lerinde köşeli parantez filtre söz dizimi kullanılır (`?alan[operatör]=değer`).
 
 Belirli bir tarih aralığındaki cevapsız çağrıları çekmek için üç temel filtreyi birleştirin:
-- `missing_call[eq]=true`: Yalnızca cevapsız çağrıları getirir.
+- `missing_call[eq]=true`: Cevapsız çağrıları getirir.
 - `started_at[gte]`: Başlangıç tarihinden sonra başlayan çağrılar.
 - `started_at[lte]`: Bitiş tarihinden önce başlayan çağrılar.
 
@@ -54,7 +54,7 @@ curl -sS -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
 
 | Filtre | Operatör | Değer | İşlevi |
 |---|---|---|---|
-| `missing_call` | `eq` | `true` | Yalnızca cevapsız çağrıları listeler. |
+| `missing_call` | `eq` | `true` | Cevapsız çağrıları listeler. |
 | `started_at` | `gte` | `2026-09-01T00:00:00Z` | Belirtilen tarih ve sonrasındaki çağrılar. |
 | `started_at` | `lte` | `2026-09-08T23:59:59Z` | Belirtilen tarih ve öncesindeki çağrılar. |
 
@@ -66,7 +66,36 @@ Hipcall liste endpoint'leri standart olarak `data` dizisi ve `meta` nesnesi dön
 
 ```json
 {
-  "data": [ ... ],
+  "data": [
+    {
+      "id": 10582,
+      "direction": "inbound",
+      "caller_number": "+905551234567",
+      "callee_number": "+902129876543",
+      "started_at": "2026-09-05T14:32:10Z",
+      "answered_at": null,
+      "ended_at": "2026-09-05T14:32:45Z",
+      "call_duration": 0,
+      "missing_call": true,
+      "status": "missed",
+      "recording_url": null,
+      "tags": ["destek"]
+    },
+    {
+      "id": 10583,
+      "direction": "inbound",
+      "caller_number": "+905321112233",
+      "callee_number": "+902129876543",
+      "started_at": "2026-09-06T09:15:00Z",
+      "answered_at": null,
+      "ended_at": "2026-09-06T09:15:20Z",
+      "call_duration": 0,
+      "missing_call": true,
+      "status": "missed",
+      "recording_url": null,
+      "tags": []
+    }
+  ],
   "meta": {
     "count": 142,
     "offset": 0,
@@ -82,47 +111,45 @@ Hipcall liste endpoint'leri standart olarak `data` dizisi ve `meta` nesnesi dön
 | `meta.offset` | Bu sayfadan önce atlanan kayıt sayısı. |
 | `meta.limit` | Sayfa başına dönen maksimum kayıt sayısı (varsayılan: 10, üst sınır: 100). |
 
-Toplam sayfa sayısı `ceil(meta.count / meta.limit)` formülüyle bulunur. 142 kayıt ve 100'lük limit için ilk sayfa 100, ikinci sayfa 42 kayıt döner. Tüm kayıtları toplamak için döngü içinde `offset` değerini `limit` kadar artırın:
+Toplam sayfa sayısı `ceil(meta.count / meta.limit)` formülüyle bulunur. 142 kayıt ve 100 limit için ilk sayfa 100, ikinci sayfa 42 kayıt döner. Tüm kayıtları toplamak için döngü içinde `offset` değerini `limit` kadar artırın:
 
 ```mermaid
 flowchart TD
     A["Başla: offset = 0"] --> B["GET /api/v3/calls?limit=100&offset=offset"]
     B --> C{HTTP 200 OK?}
-    C -- Hayır --> D["Hata mesajını yazdır ve dur"]
+    C -- Hayır --> D["Hata mesajını fırlat ve dur"]
     C -- Evet --> E["meta.count değerini oku"]
     E --> F["Gelen kayıtları listeye ekle"]
     F --> G{"offset + limit < meta.count?"}
     G -- Evet --> H["offset = offset + limit"]
     H --> B
-    G -- Hayır --> I["Tüm kayıtlar toplandı, CSV'ye yaz"]
+    G -- Hayır --> I["Tüm kayıtlar toplandı"]
 ```
 
 Siz sayfaları çekerken sisteme yeni bir çağrı eklenir veya silinirse liste kayar. İkinci sayfada aynı kaydı tekrar görebilir veya bir kaydı atlayabilirsiniz.
 
-## Betiğin tamamı
+## Sayfalama mantığının C# örneği
 
-Aşağıdaki C# konsol uygulaması son 7 günün cevapsız çağrılarını çeker, sayfalama sınırlarına takılmadan tüm veriyi toplar ve `missed-calls-YYYY-MM-DD.csv` dosyasına yazar:
+Aşağıdaki C# sınıfı cevapsız çağrıları çeker, sayfalama sınırlarına takılmadan tüm veriyi toplar ve JSON formatından okur. Kendi bağımsız HTTP istemcisiyle çalışır.
 
 ```csharp
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Threading.Tasks;
 
-string? token = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN");
-if (string.IsNullOrWhiteSpace(token))
-{
-    Console.Error.WriteLine("Hata: HIPCALL_API_TOKEN çevre değişkeni tanımlı değil.");
-    return 1;
-}
+// Konsol uygulaması yapılandırması (çevre değişkenleri vb.) sadeleştirme amacıyla atlanmıştır.
 
 const string baseUrl = "https://use.hipcall.com.tr/api/v3/calls";
-const int pageSize = 100;
-string csvFile = $"missed-calls-{DateTime.UtcNow:yyyy-MM-dd}.csv";
-
-string from = DateTime.UtcNow.AddDays(-7).Date.ToString("yyyy-MM-ddT00:00:00Z");
-string to = DateTime.UtcNow.Date.ToString("yyyy-MM-ddT23:59:59Z");
+string fromDate = "2026-09-01T00:00:00Z";
+string toDate = "2026-09-08T23:59:59Z";
+int pageSize = 100;
 
 using var client = new HttpClient();
-client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "API_ANAHTARINIZ");
+client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
 var allCalls = new List<JsonElement>();
 int offset = 0;
@@ -131,8 +158,8 @@ int totalCount;
 do
 {
     string url = $"{baseUrl}?missing_call%5Beq%5D=true"
-               + $"&started_at%5Bgte%5D={Uri.EscapeDataString(from)}"
-               + $"&started_at%5Blte%5D={Uri.EscapeDataString(to)}"
+               + $"&started_at%5Bgte%5D={Uri.EscapeDataString(fromDate)}"
+               + $"&started_at%5Blte%5D={Uri.EscapeDataString(toDate)}"
                + $"&limit={pageSize}&offset={offset}";
 
     HttpResponseMessage response = await client.GetAsync(url);
@@ -140,51 +167,34 @@ do
 
     if (!response.IsSuccessStatusCode)
     {
-        Console.Error.WriteLine($"Hata: {(int)response.StatusCode} {response.StatusCode}");
-        Console.Error.WriteLine(body);
-        return 1;
+        throw new Exception($"API Hatası: {(int)response.StatusCode}\n{body}");
     }
 
     using JsonDocument doc = JsonDocument.Parse(body);
-    JsonElement meta = doc.RootElement.GetProperty("meta");
+    JsonElement root = doc.RootElement;
+    
+    JsonElement meta = root.GetProperty("meta");
     totalCount = meta.GetProperty("count").GetInt32();
+    int currentLimit = meta.GetProperty("limit").GetInt32();
 
-    foreach (JsonElement call in doc.RootElement.GetProperty("data").EnumerateArray())
+    foreach (JsonElement call in root.GetProperty("data").EnumerateArray())
     {
         allCalls.Add(call.Clone());
     }
 
-    offset += meta.GetProperty("limit").GetInt32();
+    offset += currentLimit;
 
 } while (offset < totalCount);
 
-using var writer = new StreamWriter(csvFile);
-writer.WriteLine("date;caller_number;callee_number;duration_seconds");
-foreach (JsonElement call in allCalls)
-{
-    string date = call.TryGetProperty("started_at", out var s) ? s.GetString() ?? "" : "";
-    string caller = call.TryGetProperty("caller_number", out var c) ? c.GetString() ?? "" : "";
-    string callee = call.TryGetProperty("callee_number", out var e) ? e.GetString() ?? "" : "";
-    string dur = call.TryGetProperty("call_duration", out var d) ? d.ToString() : "0";
-    writer.WriteLine($"\"{date}\";\"{caller}\";\"{callee}\";{dur}");
-}
-
-Console.WriteLine($"İşlem tamamlandı. {allCalls.Count} adet cevapsız çağrı {csvFile} dosyasına yazıldı.");
-return 0;
-```
-
-Uygulamayı çalıştırmak için:
-
-```bash
-export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
-dotnet run
+// 'allCalls' listesi artık filtreye uyan tüm çağrı kayıtlarını içerir
 ```
 
 ### Kod hakkında notlar
 
-- **Tek HttpClient kullanımı:** Her HTTP isteği için döngü içinde `new HttpClient()` açmayın. Tek bir `using var` örneği soket sızıntısını engeller.
+- **Tek HttpClient kullanımı:** Sınıf örneği içinde tek bir `HttpClient` oluşturun. Her HTTP isteği için döngü içinde yenisini açmak soket sızıntısına yol açar.
 - **meta.count ile döngü:** Döngü boş sayfa beklemek yerine `meta.count` değerine bakarak durmalıdır. Boş sayfa beklemek fazladan istek atmanıza ve veriler değişirse eksik sonuç almanıza yol açar.
-- **Hata gövdesini koruma:** İstek başarısız olduğunda hata gövdesini yazdırın. Sadece `EnsureSuccessStatusCode()` kullanırsanız API'nin açıklayıcı mesajını kaybedersiniz.
+- **Dinamik limit artışı:** Sayfa `offset` değerini, doğrudan API'den gelen `meta.limit` (`currentLimit`) kadar artırır. Böylece sunucu yanıtıyla her zaman tam uyumlu çalışır.
+- **Hata gövdesini koruma:** İstek başarısız olduğunda hata gövdesini saklayın. `EnsureSuccessStatusCode()` kullanırsanız API'nin açıklayıcı mesajını kaybedersiniz.
 
 ## Hata aldığınızda
 
@@ -200,7 +210,7 @@ API anahtarınız tanımlanmamış, yanlış kopyalanmış veya geçerlilik sür
 }
 ```
 
-Yönetim panelinden API anahtarınızı kontrol edin ve terminalde çevre değişkenini yeniden tanımlayın.
+Yönetim panelinden API anahtarınızı kontrol edin ve token bilginizi güncelleyin.
 
 ### 422 Unprocessable Entity
 
@@ -209,7 +219,9 @@ Desteklenmeyen bir filtre alanı veya geçersiz bir değer gönderdiniz:
 ```json
 {
   "errors": {
-    "started_at": ["#/started_at/gecersiz: Unexpected field: gecersiz"]
+    "started_at": [
+      "#/started_at/invalid_param: Unexpected field: invalid_param"
+    ]
   }
 }
 ```
@@ -225,7 +237,17 @@ Sık yapılan hatalar ve çözümleri:
 
 ### 429 Too Many Requests
 
-Dakikada 60 istek sınırını aştınız. İstekler arasına kısa bekleme süreleri ekleyin ve tekrar deneyin.
+Dakikada 60 istek sınırını aştınız. API aşağıdaki hatayı döner:
+
+```json
+{
+  "errors": {
+    "detail": "Too many requests. Please try again later."
+  }
+}
+```
+
+İstekler arasına kısa bekleme süreleri ekleyin ve tekrar deneyin.
 
 ## Parametre listesi
 

@@ -1,0 +1,17 @@
+[
+  {
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "direction": "outbound",
+    "caller_number": "+90850XXXXXXX",
+    "callee_number": "+90530XXXXXXX",
+    "call_duration": null,
+    "missing_call": null,
+    "hangup_by": null,
+    "record_url": null,
+    "started_at": "2026-09-29T14:13:23Z",
+    "answered_at": null,
+    "ended_at": null,
+    "last_event": "call_init",
+    "updated_at": "2026-09-29T14:31:07.8660065Z"
+  }
+]

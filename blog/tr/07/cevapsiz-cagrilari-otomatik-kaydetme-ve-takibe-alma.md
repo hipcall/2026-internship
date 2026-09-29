@@ -35,6 +35,75 @@ Aşağıdakileri hazırlayın:
 
 Yalnızca cevapsız çağrılara görev açmak için onları doğru tespit etmelisiniz. `call_hangup` webhook'u çeşitli alanlar sunar, ancak tek başına `missing_call` alanına güvenmek yeterli değildir.
 
+Aşağıdaki `curl` komutu ile uygulamanızı test etmek için sahte bir `call_hangup` olayını yerel sunucunuza gönderebilirsiniz:
+
+```bash
+curl -X POST http://localhost:5000/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
+  "data": {
+    "credited": false,
+    "team_touch_at": null,
+    "first_touch_duration": 10,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": "2026-09-29T14:13:33Z",
+    "voicemail_url": null,
+    "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": null,
+    "call_duration": 12,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "hangup",
+        "detail": {
+          "hangup_by": "contact"
+        },
+        "timestamp": 1790691215
+      },
+      {
+        "action": "bridge",
+        "detail": {
+          "id": 4200,
+          "type": "user"
+        },
+        "timestamp": 1790691205
+      },
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "outbound",
+    "callee_number": "+90530XXXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": "2026-09-29T14:13:35Z",
+    "missing_call": false,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": 4200,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": "2026-09-29T14:13:33Z",
+    "channel_id": 942,
+    "caller_type": "user",
+    "user_id": 4200,
+    "hangup_by": "contact",
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "record_url": "https://storage.hipcall.com.tr/recordings/...masked...",
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_hangup"
+}'
+```
+
 Müşteri arayıp sesli mesaj bıraktığında `missing_call` alanı `true` döner. Santral genellikle sesli mesajlar için ayrı bir görev oluşturur. Webhook alıcınız da `missing_call == true` koşuluna bakarak görev açarsa, aynı çağrı için iki farklı görev yaratmış olursunuz.
 
 Gerçek bir cevapsız çağrıyı tespit etmek için hem `missing_call` hem de `voicemail_id` alanlarını kontrol edin:
@@ -57,9 +126,24 @@ Cevapsız çağrı için doğru koşul `missing_call == true` VE `voicemail_id =
 
 Geçerli en küçük istek gövdesi yalnızca `disposition_code` alanını gerektirir:
 
+```csharp
+var dispositionBody = new { disposition_code = "geri_arama_istendi" };
+var dispContent = new StringContent(JsonSerializer.Serialize(dispositionBody), Encoding.UTF8, "application/json");
+var response = await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
+```
+
+İşlem başarılı olduğunda API `200 OK` döner ve atanan kodun detaylarını verir:
+
 ```json
 {
-  "disposition_code": "geri_arama_istendi"
+  "data": {
+    "code": "geri_arama_istendi",
+    "name": "Geri Arama İstendi",
+    "disposition_id": 495,
+    "edit_window_minutes": 15,
+    "editable_until": "2026-09-25T11:50:43Z",
+    "editable": true
+  }
 }
 ```
 
@@ -69,25 +153,46 @@ Hem `disposition_id` hem de `disposition_code` gönderirseniz, API veri uyuşmaz
 
 Görev oluşturmak için `POST /api/v3/tasks` endpoint'ini kullanın. `name` alanı zorunludur.
 
+```csharp
+var taskBody = new Dictionary<string, object>
+{
+    ["name"] = $"Geri Arama: {call.CallerNumber} — Cevapsız Çağrı",
+    ["assign_to_user_id"] = 4200,
+    ["due_date"] = DateTime.UtcNow.AddMinutes(30).ToString("yyyy-MM-ddTHH:mm:ssZ"),
+    ["contact_ids"] = new[] { 12345 },
+    ["company_ids"] = new[] { 6789 }
+};
+
+var taskContent = new StringContent(JsonSerializer.Serialize(new { data = taskBody }), Encoding.UTF8, "application/json");
+var response = await client.PostAsync("tasks", taskContent);
+```
+
+İşlem başarılı olduğunda API `201 Created` döner:
+
+```json
+{
+  "data": {
+    "id": 273905,
+    "name": "Geri Arama: +90555XXXXXXX — Cevapsız Çağrı",
+    "priority": null,
+    "done": false,
+    "description": null,
+    "companies": [{"id": 6789, "name": "Örnek Firma A.Ş."}],
+    "contacts": [{"id": 12345, "name": "Ahmet Y."}],
+    "done_at": null,
+    "due_date": "2026-09-27T15:00:00Z",
+    "assign_to_user_id": 4200
+  }
+}
+```
+
 Görevi bir temsilciye atamak için kullanıcı kimliğini `assign_to_user_id` alanında gönderin. Görevi kimin alması gerektiğini şu yedekleme stratejisiyle belirleyebilirsiniz:
 
 1. Arayan kişinin CRM'de atanmış bir sahibi olup olmadığını kontrol edin (`contact.user_id`).
 2. Çağrının belirli bir kullanıcıya çalıp çalmadığına bakın (`data.user_id`).
 3. Uygulama ayarlarınızda yapılandırdığınız varsayılan bir yönetici kimliğine atayın. Bu yöntem hiçbir çağrının sahipsiz kalmamasını sağlar.
 
-Görevi doğrudan ilgili kişi ve firma kayıtlarına bağlamak için `contact_ids` ve `company_ids` alanlarını ekleyin. Böylece açılan görev, Hipcall panelinde ilgili kişinin ve firmanın sayfasında görünür.
-
 Son tarihi (`due_date`) UTC (`Z`) kullanarak ISO 8601 formatında ayarlayın. Saat dilimi farkını belirtmezseniz API "Invalid format" hatası fırlatır.
-
-```json
-{
-  "name": "Geri Arama: +90555XXXXXXX",
-  "assign_to_user_id": 4200,
-  "due_date": "2026-09-27T15:00:00Z",
-  "contact_ids": [12345],
-  "company_ids": [6789]
-}
-```
 
 ## Webhook ile entegre etme
 
@@ -122,22 +227,34 @@ flowchart TD
     CheckTaskSuccess -- Evet --> Finish
 ```
 
-## C# Minimal API uygulaması
+## Minimal API alıcı örneği
 
 Aşağıdaki ASP.NET Core uygulaması, `call_hangup` webhook olayını karşılar. Koşulları kontrol ederek cevapsız çağrıyı ayıklar, sonuç kodunu atar, sorumlu kullanıcıyı belirler ve çağrıyı müşteri/firma kayıtlarıyla ilişkilendirerek takip görevini oluşturur:
 
 ```csharp
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni bulunamadı.");
+    
 builder.Services.AddHttpClient("HipcallClient", client =>
 {
     client.BaseAddress = new Uri("https://use.hipcall.com.tr/api/v3/");
-    client.DefaultRequestHeaders.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN"));
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
 });
 
 var app = builder.Build();
@@ -148,7 +265,9 @@ var jsonOptions = new JsonSerializerOptions
     PropertyNameCaseInsensitive = true
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_secret";
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET ortam değişkeni bulunamadı.");
+
 var defaultManagerId = 4200;
 var processedCalls = new ConcurrentDictionary<string, DateTime>();
 
@@ -195,7 +314,12 @@ app.MapPost("/hipcall/events/{secret?}", async (
         {
             var dispositionBody = new { disposition_code = "geri_arama_istendi" };
             var dispContent = new StringContent(JsonSerializer.Serialize(dispositionBody), Encoding.UTF8, "application/json");
-            await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
+            var response = await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                logger.LogError("Sonuç kodu atanamadı: {Uuid}, Hata: {Error}", call.Uuid, err);
+            }
         }
         catch (Exception ex)
         {
@@ -244,7 +368,12 @@ app.MapPost("/hipcall/events/{secret?}", async (
                 Encoding.UTF8,
                 "application/json");
 
-            await client.PostAsync("tasks", taskContent);
+            var response = await client.PostAsync("tasks", taskContent);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                logger.LogError("Takip görevi açılamadı: {Uuid}, Hata: {Error}", call.Uuid, err);
+            }
         }
         catch (Exception ex)
         {

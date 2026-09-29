@@ -1,6 +1,6 @@
 ---
-title: "How to Tag Short Calls Automatically with the Hipcall API"
-description: "An answered call that lasted eight seconds is not a successful call. Detect short calls from the webhook and tag them for review."
+title: "How to tag short calls automatically using Hipcall API"
+description: "A call that lasts eight seconds and appears answered is actually a failure. Detect short calls via webhooks and tag them for review."
 slug: how-to-tag-short-calls-automatically
 lang: en
 locales: [en, tr]
@@ -18,158 +18,276 @@ status: draft
 
 ## Overview
 
-An answered call that lasts 8 seconds appears as a "successful call" in standard reports. However, no business discussion happens in 8 seconds. These calls usually indicate problems: wrong numbers, audio issues, or agents hanging up prematurely.
+An 8-second call that is marked as answered appears "successful" in reports. In reality, no business is discussed in 8 seconds. These calls indicate issues such as wrong numbers, audio problems, or agents hanging up early.
 
-This guide explains how to detect short calls using the Hipcall webhook and apply tags for later review. Team leaders can filter calls by these tags to identify systemic issues without manually inspecting every record.
+Detect short calls via webhooks and tag them so team leaders can filter problematic calls instead of searching for them one by one.
 
 ## Before you start
 
-- Have an active Hipcall API key.
-- Understand how to receive the `call_hangup` webhook event.
-- Create the necessary tags in your Hipcall dashboard (Settings > Call Center > Tags). You must define tags in the UI before using them in the API. Note their IDs for your configuration.
+- Obtain an active Hipcall API token.
+- Set up the infrastructure to receive the `call_hangup` webhook event.
+- Go to Settings > Call Center > Tags in the Hipcall panel to create the necessary tags. Tags are not created via the API; you can only assign existing ones. Note down the tag ID values for configuration.
 
-## Which duration field do you actually want?
+## Which duration field should you use?
 
-The call record contains multiple time fields. Choosing the correct one is critical to avoid false positives.
+The call record contains multiple time-related fields. Select the correct one to avoid inaccurate reports.
 
-| Field | Measures |
+| Field | Measurement |
 |---|---|
 | `call_duration` | Total billable time, including announcements and ringing |
 | `first_touch_duration` | Time from entering the system until the agent answers |
-| `started_at` | When the call entered the system |
-| `answered_at` | When the PBX or agent answered the call |
-| `bridged_at` | When the customer and agent are connected |
-| `ended_at` | When the call disconnected |
+| `started_at` | The exact moment the call enters the system |
+| `answered_at` | The moment the PBX or agent answers the call |
+| `bridged_at` | The moment the customer and agent are connected |
+| `ended_at` | The moment the call is disconnected |
 
-Do not use `call_duration` to measure conversation length. A 45-second call that never connects has a `call_duration` of 45 seconds. An answered call might have a 15-second announcement and a 6-second conversation, resulting in a `call_duration` of 21 seconds.
+Do not use `call_duration` to measure talk time. A call that rings for 45 seconds and goes unanswered has a `call_duration` of 45 seconds. A call where the customer listens to an announcement for 15 seconds and talks for 6 seconds has a `call_duration` of 21 seconds.
 
-Calculate the actual conversation duration by finding the difference between `ended_at` and `bridged_at`.
+To calculate the actual talk time, take the difference between the `ended_at` and `bridged_at` timestamps.
 
-## Who hung up, and why it matters
+## Who hung up and why does it matter?
 
-When reviewing short calls, knowing who ended the conversation is essential. The `hangup_by` field provides this information.
+When reviewing short calls, check who disconnected the call. You can retrieve this from the `hangup_by` field.
 
-- **contact:** The customer hung up. This is usually a natural drop, such as dialing a wrong number or changing their mind.
-- **user:** The agent hung up. This is a critical issue that requires immediate attention from Quality Assurance.
+- **contact:** The customer hung up. This is a natural drop due to a wrong number or being busy.
+- **user:** The agent hung up. This means the agent disconnected the line or there is a hardware issue. It is a red flag for a quality assurance manager.
 
-Create two separate tags (e.g., `short-call-agent` and `short-call-customer`). Applying a single generic tag mixes customer errors with intentional agent hangups, destroying the analytical value of the tag.
+Use two separate tags (e.g., `short-call-agent` and `short-call-customer`). Applying a single generic tag mixes customer errors with intentional agent hang-ups.
 
 ## Step 1: Adding a tag
 
-Use the `POST /api/v3/calls/{call_id}/tags` endpoint to add a tag. The payload requires the `tag_id`, not the tag name.
+Use the `POST /api/v3/calls/{call_id}/tags` endpoint to add a tag to a call. Send the `tag_id` value in the request body, not the tag name.
 
-```http
-POST /api/v3/calls/5c1904ed-ea4d-4209-badd-a985caf0c32a/tags
-Authorization: Bearer HIPCALL_API_TOKEN
-Content-Type: application/json
+```csharp
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN environment variable not found.");
 
+client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
+
+var tagBody = new { tag_id = 5635 };
+var tagContent = new StringContent(JsonSerializer.Serialize(tagBody), Encoding.UTF8, "application/json");
+
+var response = await client.PostAsync($"calls/{callUuid}/tags", tagContent);
+```
+
+When successful, the API returns `200 OK` (or `201 Created`) with the assigned tag details:
+
+```json
 {
-  "tag_id": 5617
+  "data": {
+    "id": 5635,
+    "name": "test-kisa-cagri-1",
+    "description": "test",
+    "color": "#ef4444",
+    "color_name": "red"
+  }
 }
 ```
 
-The API will return `404 Not Found` if you send a non-existent `tag_id`. The endpoint is idempotent; sending the same tag multiple times returns a successful response without creating duplicates.
+If you send a non-existent `tag_id`, the API returns `404 Not Found`. This endpoint is idempotent. Sending the same tag twice does not throw an error; it returns successfully but does not create a duplicate record.
 
-## Step 2: Wiring it to the webhook
+## Step 2: Webhook rules
 
-Configure your threshold and tag IDs in `appsettings.json`.
+Before running the rule, verify that the call has `bridged_at` and `ended_at` values, and skip missed calls.
+
+You can send the following `curl` command to your local webhook receiver to test your application with a mock `call_hangup` event where the conversation lasted six seconds:
+
+```bash
+curl -X POST http://localhost:5000/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
+  "data": {
+    "credited": false,
+    "team_touch_at": null,
+    "first_touch_duration": 10,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": "2026-09-29T14:13:33Z",
+    "voicemail_url": null,
+    "caller_number": "+447700XXXXXX",
+    "missing_call_reason": null,
+    "call_duration": 12,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "hangup",
+        "detail": {
+          "hangup_by": "contact"
+        },
+        "timestamp": 1790691215
+      },
+      {
+        "action": "bridge",
+        "detail": {
+          "id": 4200,
+          "type": "user"
+        },
+        "timestamp": 1790691205
+      },
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "outbound",
+    "callee_number": "+442079XXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": "2026-09-29T14:13:35Z",
+    "missing_call": false,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": 4200,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": "2026-09-29T14:13:33Z",
+    "channel_id": 942,
+    "caller_type": "user",
+    "user_id": 4200,
+    "hangup_by": "contact",
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "record_url": "https://storage.hipcall.com/recordings/...masked...",
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_hangup"
+}'
+```
+
+Do not hardcode the threshold value and tag IDs. Using dynamic values allows changes without recompilation. Read them from the `appsettings.json` file:
 
 ```json
 {
   "Hipcall": {
     "ShortCallThresholdSeconds": 10,
     "ShortCallAgentTagId": 5618,
-    "ShortCallCustomerTagId": 5617
+    "ShortCallCustomerTagId": 5635
   }
 }
 ```
 
-Read the threshold from configuration instead of hardcoding it. This allows quick adjustments without deploying new code. Check if the call has a `bridged_at` value to ensure the rule only processes answered calls.
+## Minimal API receiver example
 
-## The full script
-
-This implementation uses C# and evaluates the rule within a webhook receiver.
+This ASP.NET Core application receives the webhook event. It calculates the duration and, if it falls below the threshold, sends the appropriate tag to the API based on which party hung up.
 
 ```csharp
-using Hipcall.PostCall.Models;
+using System;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
-public sealed class ShortCallTagRule : IPostCallRule
+var builder = WebApplication.CreateBuilder(args);
+
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN environment variable not found.");
+
+builder.Services.AddHttpClient("HipcallClient", client =>
 {
-    public string RuleName => "ShortCallTagRule";
+    client.BaseAddress = new Uri("https://use.hipcall.com/api/v3/");
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
+});
 
-    private readonly HipcallApiClient _api;
-    private readonly HipcallSettings _settings;
-    private readonly ILogger<ShortCallTagRule> _logger;
+var app = builder.Build();
 
-    public ShortCallTagRule(
-        HipcallApiClient api,
-        IOptions<HipcallSettings> settings,
-        ILogger<ShortCallTagRule> logger)
-    {
-        _api = api;
-        _settings = settings.Value;
-        _logger = logger;
-    }
-
-    public bool Matches(WebhookPayload payload)
-    {
-        if (payload.Data == null) return false;
-        if (payload.Event != "call_hangup") return false;
-        
-        if (payload.Data.IsMissedCall) return false;
-        if (string.IsNullOrEmpty(payload.Data.BridgedAt)) return false;
-
-        return true;
-    }
-
-    public async Task ExecuteAsync(WebhookPayload payload, CancellationToken ct = default)
-    {
-        var call = payload.Data!;
-
-        if (!DateTime.TryParse(call.BridgedAt, out var bridgedAt) || 
-            !DateTime.TryParse(call.EndedAt, out var endedAt))
-        {
-            return;
-        }
-
-        var talkDurationSeconds = (endedAt - bridgedAt).TotalSeconds;
-
-        if (talkDurationSeconds >= _settings.ShortCallThresholdSeconds)
-        {
-            return;
-        }
-
-        int tagId = call.HangupBy == "user" 
-            ? _settings.ShortCallAgentTagId 
-            : _settings.ShortCallCustomerTagId;
-
-        if (tagId == 0) return;
-
-        await _api.AddTagToCallAsync(call.Uuid, tagId, ct);
-    }
-}
-```
-
-The `HipcallApiClient` implementation:
-
-```csharp
-public async Task<bool> AddTagToCallAsync(string callUuid, int tagId, CancellationToken ct = default)
+var jsonOptions = new JsonSerializerOptions
 {
-    var body = new { tag_id = tagId };
-    var content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json");
+    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    PropertyNameCaseInsensitive = true
+};
 
-    var response = await _http.PostAsync($"calls/{callUuid}/tags", content, ct);
-    if (response.IsSuccessStatusCode)
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET environment variable not found.");
+
+app.MapPost("/hipcall/events/{secret?}", async (
+    string? secret,
+    HttpRequest request,
+    IConfiguration config,
+    IHttpClientFactory httpClientFactory,
+    ILogger<Program> logger) =>
+{
+    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
     {
-        return true;
+        return Results.Unauthorized();
     }
 
-    var errorBody = await response.Content.ReadAsStringAsync(ct);
-    _logger.LogError("[Tag] Error {Status}: {Body}", (int)response.StatusCode, errorBody);
-    return false;
-}
+    using var reader = new StreamReader(request.Body, Encoding.UTF8);
+    var rawBody = await reader.ReadToEndAsync();
+    if (string.IsNullOrWhiteSpace(rawBody))
+    {
+        return Results.Ok();
+    }
+
+    var payload = JsonSerializer.Deserialize<WebhookPayload>(rawBody, jsonOptions);
+    if (payload?.Data == null || payload.Event != "call_hangup")
+    {
+        return Results.Ok();
+    }
+
+    var call = payload.Data;
+    
+    if (call.MissingCall || string.IsNullOrEmpty(call.BridgedAt) || string.IsNullOrEmpty(call.EndedAt))
+    {
+        return Results.Ok();
+    }
+
+    if (!DateTime.TryParse(call.BridgedAt, out var bridgedAt) || 
+        !DateTime.TryParse(call.EndedAt, out var endedAt))
+    {
+        return Results.Ok();
+    }
+
+    var thresholdSeconds = config.GetValue<int>("Hipcall:ShortCallThresholdSeconds", 10);
+    var agentTagId = config.GetValue<int>("Hipcall:ShortCallAgentTagId", 5618);
+    var customerTagId = config.GetValue<int>("Hipcall:ShortCallCustomerTagId", 5635);
+
+    var talkDuration = (endedAt - bridgedAt).TotalSeconds;
+
+    if (talkDuration < thresholdSeconds)
+    {
+        _ = Task.Run(async () =>
+        {
+            var tagId = call.HangupBy == "user" ? agentTagId : customerTagId;
+            if (tagId == 0) return;
+
+            var client = httpClientFactory.CreateClient("HipcallClient");
+            var body = new { tag_id = tagId };
+            var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+            try
+            {
+                var response = await client.PostAsync($"calls/{call.Uuid}/tags", content);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    logger.LogError("Failed to add tag: {Uuid}, Error: {Error}", call.Uuid, err);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error while adding tag: {Uuid}", call.Uuid);
+            }
+        });
+    }
+
+    return Results.Ok();
+});
+
+app.Run();
+
+record WebhookPayload(string Event, CallData? Data);
+record CallData(string Uuid, bool MissingCall, string? BridgedAt, string? EndedAt, string? HangupBy);
 ```
 
 ## When it fails
@@ -183,7 +301,7 @@ public async Task<bool> AddTagToCallAsync(string callUuid, int tagId, Cancellati
   }
 }
 ```
-You sent a `tag_id` that does not exist. Verify that the tag is created in the dashboard and the configuration file contains the correct ID.
+You sent a `tag_id` that does not exist in the panel. Verify that the tag is created in the panel and its ID is correctly defined in the configuration.
 
 **422 Unprocessable Entity**
 
@@ -196,16 +314,16 @@ You sent a `tag_id` that does not exist. Verify that the tag is created in the d
   }
 }
 ```
-You sent the tag name instead of the ID. Update your request payload to pass the integer `tag_id`.
+You sent the name of the tag instead of the ID. Update the request body to include the numeric `tag_id` field.
 
 ## Parameter reference
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `tag_id` | integer | yes | The unique identifier of the tag. Found in the dashboard URL when editing a tag. |
+| `tag_id` | integer | yes | The unique ID of the tag. This can be found in the URL on the tag edit screen in the panel. |
 
 ## Next steps
 
-- Set up a CRM report to group short calls by agent and identify training opportunities.
-- Monitor the volume of customer-dropped short calls to find potential routing issues in your IVR tree.
-- Analyze the real conversation durations over time to fine-tune your threshold setting.
+- Generate short call reports by agent to identify training needs.
+- Monitor the volume of customer-initiated short calls to detect potential routing errors in your PBX menu (IVR).
+- Analyze actual talk times over time to update your threshold value appropriately.

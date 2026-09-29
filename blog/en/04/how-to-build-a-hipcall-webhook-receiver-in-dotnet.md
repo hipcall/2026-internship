@@ -25,10 +25,10 @@ Webhooks push events to your application instantly. When a call starts, connects
 A production-ready webhook receiver needs four things:
 - Respond in under 50 milliseconds to avoid timeouts.
 - Secure the endpoint with a secret route token.
-- Deduplicate events by UUID to handle network retries.
+- Deduplicate events and reconciliation data by UUID.
 - Reconcile data nightly to cover server downtime.
 
-This page covers configuring a webhook, building an ASP.NET Core Minimal API receiver, and downloading audio in the background.
+This page covers configuring a webhook, inspecting real payloads, and building an ASP.NET Core Minimal API receiver.
 
 ## Before you start
 
@@ -53,70 +53,62 @@ Create the webhook in the Hipcall dashboard:
    - Events: Check `call_init`, `call_bridged`, and `call_hangup`.
 4. Check the Logs tab. Turn on Debug Mode to capture request bodies and status codes for two hours.
 
-## Receiving your first event
+## Payload structure and curl test
 
-Create an ASP.NET Core Minimal API project:
+Hipcall sends `application/json`. The payload includes an `event` name and a nested `data` object containing the call details.
+
+You can simulate a Hipcall `call_init` event locally using `curl`:
 
 ```bash
-dotnet new web -n Hipcall.WebhookReceiver
-cd Hipcall.WebhookReceiver
-```
-
-Start with a receiver that checks the secret token and prints the payload:
-
-```csharp
-using System.Text;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenAnyIP(5080);
-});
-
-var app = builder.Build();
-
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
-
-app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request) =>
-{
-    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
-    {
-        return Results.Unauthorized();
-    }
-
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var body = await reader.ReadToEndAsync();
-    Console.WriteLine($"Webhook received:\n{body}");
-    return Results.Ok();
-});
-
-app.Run();
-```
-
-Run it with `dotnet run` and make a test call.
-
-### Payload structure
-
-Hipcall sends `application/json` with a two-key envelope:
-
-```json
-{
-  "event": "call_hangup",
+curl -X POST http://localhost:5080/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
   "data": {
-    "uuid": "9a266251-d2a3-44fc-b422-9486ddf880c7",
+    "credited": null,
+    "team_touch_at": null,
+    "first_touch_duration": null,
+    "contact_id": null,
+    "callee_id": null,
+    "answered_at": null,
+    "voicemail_url": null,
+    "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": null,
+    "call_duration": null,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
     "direction": "outbound",
-    "caller_number": "+442079460123",
-    "callee_number": "+447700900123",
-    "call_duration": 14,
-    "missing_call": false,
-    "hangup_by": "contact",
-    "record_url": "https://storage.hipcall.com/recordings/1412/2026/09/21/9a266251-d2a3-44fc-b422-9486ddf880c7.mp3?X-Amz-Expires=604800...",
-    "started_at": "2026-09-21T10:37:07Z",
-    "answered_at": "2026-09-21T10:37:07Z",
-    "ended_at": "2026-09-21T10:37:21Z"
-  }
-}
+    "callee_number": "+90530XXXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": null,
+    "missing_call": null,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": null,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": null,
+    "channel_id": 942,
+    "caller_type": null,
+    "user_id": 4200,
+    "hangup_by": null,
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "record_url": null,
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_init"
+}'
 ```
 
 ### Inspecting request headers
@@ -125,7 +117,7 @@ The raw HTTP headers look like this:
 
 ```http
 Host: your-server.example.com
-User-Agent: Hipcall-Webhook/1.0
+User-Agent: mint/1.9.0
 Content-Type: application/json
 Accept-Encoding: gzip
 X-Forwarded-For: 31.192.211.2
@@ -166,7 +158,7 @@ flowchart TD
     D --> E["Acknowledge HTTP 200 OK (< 50 ms)"]
 
     subgraph BG ["Background Asynchronous Processing"]
-        F["Upsert Call Record in calls.json (Upsert)"]
+        F["Upsert Call Record in Database"]
         F --> G{"record_url exists?"}
         G -- "Yes" --> H["Download MP3 to recordings/ folder"]
         G -- "No" --> I["Complete"]
@@ -195,7 +187,7 @@ The execution flow:
 
 ### 2. Idempotency (Deduplication)
 
-Network retries can deliver the same event twice. To prevent duplicate data:
+The `call_init`, `call_bridged`, and `call_hangup` events belonging to the same call will arrive at different times bearing the same `uuid`. Your system must process them as updates to the existing record, not as new records. Additionally, when you pull all calls of the day from the API during nightly reconciliation, the payload will include calls already recorded via webhook. To prevent duplicate data:
 - Use `data.uuid` as your deduplication key.
 - Never deduplicate by timestamp or phone number.
 - Upsert the existing record when new events arrive.
@@ -219,170 +211,66 @@ Since requests lack HMAC headers, secure your endpoint in two ways:
 1. Secret route path: Include an unpredictable token in the URL (`/hipcall/events/whsec_live_...`). Return 401 Unauthorized if it is missing or wrong.
 2. IP whitelisting: Restrict inbound traffic at your proxy to Hipcall's IP address (`31.192.211.2`).
 
-## The full example
+## Minimal API receiver example
 
-This ASP.NET Core Minimal API implementation includes secret validation, idempotent storage, and asynchronous audio downloads.
+This compact ASP.NET Core Minimal API endpoint accepts the JSON payload, verifies the secret token, delegates processing to a background thread, and immediately returns `200 OK`. 
 
 ```csharp
-using System.Text;
+using System;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenAnyIP(5080);
-});
-
-builder.Services.AddHttpClient();
-
+builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(5080));
 var app = builder.Build();
+
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET environment variable is missing.");
 
 var jsonOptions = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    PropertyNameCaseInsensitive = true,
-    WriteIndented = true,
-    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    PropertyNameCaseInsensitive = true
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_xxxxxxxxxxxxxxxx";
-var baseDir = Directory.GetCurrentDirectory();
-var callsFilePath = Path.Combine(baseDir, "calls.json");
-var fileLock = new object();
-
-Dictionary<string, CallRecord> storedCalls = new(StringComparer.OrdinalIgnoreCase);
-
-if (File.Exists(callsFilePath))
-{
-    try
-    {
-        var existingJson = File.ReadAllText(callsFilePath);
-        var existingList = JsonSerializer.Deserialize<List<CallRecord>>(existingJson, jsonOptions);
-        if (existingList != null)
-        {
-            foreach (var call in existingList)
-            {
-                if (!string.IsNullOrEmpty(call.Uuid))
-                {
-                    storedCalls[call.Uuid] = call;
-                }
-            }
-        }
-    }
-    catch
-    {
-    }
-}
-
-app.MapGet("/", () => Results.Ok("Hipcall Webhook Receiver is healthy."));
-
-app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request, IHttpClientFactory httpClientFactory) =>
+app.MapPost("/hipcall/events/{secret?}", async (string? secret, HttpRequest request) =>
 {
     if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
     {
         return Results.Unauthorized();
     }
 
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync();
-
-    if (string.IsNullOrWhiteSpace(rawBody))
-    {
-        return Results.Ok();
-    }
-
     HipcallWebhookPayload? payload;
     try
     {
-        payload = JsonSerializer.Deserialize<HipcallWebhookPayload>(rawBody, jsonOptions);
+        payload = await JsonSerializer.DeserializeAsync<HipcallWebhookPayload>(request.Body, jsonOptions);
     }
     catch
     {
         return Results.Ok();
     }
 
-    if (payload == null || string.IsNullOrEmpty(payload.Event))
+    if (payload?.Data?.Uuid != null)
     {
-        return Results.Ok();
+        // Defer database writes and audio downloads to a background worker
+        _ = Task.Run(() => ProcessWebhookAsync(payload.Event, payload.Data.Uuid));
     }
 
-    if (payload.Event != "call_hangup" && payload.Event != "call_init" && payload.Event != "call_bridged")
-    {
-        return Results.Ok();
-    }
-
-    var data = payload.Data;
-    if (data == null || string.IsNullOrEmpty(data.Uuid))
-    {
-        return Results.Ok();
-    }
-
-    lock (fileLock)
-    {
-        var record = new CallRecord
-        {
-            Uuid = data.Uuid,
-            Direction = data.Direction,
-            CallerNumber = CallRecord.MaskNumber(data.CallerNumber),
-            CalleeNumber = CallRecord.MaskNumber(data.CalleeNumber),
-            CallDuration = data.CallDuration,
-            MissingCall = data.MissingCall,
-            HangupBy = data.HangupBy,
-            RecordUrl = data.RecordUrl,
-            StartedAt = data.StartedAt,
-            AnsweredAt = data.AnsweredAt,
-            EndedAt = data.EndedAt,
-            LastEvent = payload.Event,
-            UpdatedAt = DateTime.UtcNow.ToString("o")
-        };
-
-        storedCalls[data.Uuid] = record;
-
-        try
-        {
-            var serialized = JsonSerializer.Serialize(storedCalls.Values.ToList(), jsonOptions);
-            File.WriteAllText(callsFilePath, serialized);
-        }
-        catch
-        {
-        }
-    }
-
-    if (!string.IsNullOrEmpty(data.RecordUrl))
-    {
-        string audioUrl = data.RecordUrl;
-        string callUuid = data.Uuid;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var client = httpClientFactory.CreateClient();
-                for (int attempt = 1; attempt <= 5; attempt++)
-                {
-                    await Task.Delay(attempt == 1 ? 2500 : 3000);
-                    var response = await client.GetAsync(audioUrl);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        string recDir = Path.Combine(baseDir, "recordings");
-                        Directory.CreateDirectory(recDir);
-                        string filePath = Path.Combine(recDir, $"{callUuid}.mp3");
-                        await using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write);
-                        await response.Content.CopyToAsync(fs);
-                        return;
-                    }
-                }
-            }
-            catch
-            {
-            }
-        });
-    }
-
+    // Return HTTP 200 OK immediately
     return Results.Ok();
 });
 
 app.Run();
+
+async Task ProcessWebhookAsync(string? eventName, string uuid)
+{
+    // Idempotent upsert logic and asynchronous tasks go here
+    Console.WriteLine($"Processing {eventName} for {uuid} in background...");
+    await Task.CompletedTask;
+}
 
 public class HipcallWebhookPayload
 {
@@ -397,37 +285,13 @@ public class CallDataPayload
     public string? CallerNumber { get; set; }
     public string? CalleeNumber { get; set; }
     public int? CallDuration { get; set; }
-    public bool? MissingCall { get; set; }
-    public string? MissingCallReason { get; set; }
-    public string? HangupBy { get; set; }
     public string? RecordUrl { get; set; }
-    public string? StartedAt { get; set; }
-    public string? AnsweredAt { get; set; }
-    public string? EndedAt { get; set; }
-}
-
-public class CallRecord
-{
-    public string? Uuid { get; set; }
-    public string? Direction { get; set; }
-    public string? CallerNumber { get; set; }
-    public string? CalleeNumber { get; set; }
-    public int? CallDuration { get; set; }
-    public bool? MissingCall { get; set; }
     public string? HangupBy { get; set; }
-    public string? RecordUrl { get; set; }
-    public string? StartedAt { get; set; }
-    public string? AnsweredAt { get; set; }
-    public string? EndedAt { get; set; }
-    public string? LastEvent { get; set; }
-    public string? UpdatedAt { get; set; }
-
-    public static string? MaskNumber(string? number)
-    {
-        if (string.IsNullOrEmpty(number) || number.Length <= 6)
-            return number;
-        return number[..6] + new string('X', number.Length - 6);
-    }
+    public string? VoicemailId { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? AnsweredAt { get; set; }
+    public DateTime? BridgedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
 }
 ```
 
@@ -438,7 +302,7 @@ public class CallRecord
 If your server returns `500 Internal Server Error`:
 - The telephone conversation continues. Webhook delivery does not affect telephony routing.
 - Hipcall logs a `500` error.
-- Hipcall does not retry failed requests. This is why you must return 200 immediately and reconcile missing data nightly.
+- Hipcall does not retry failed requests. Return 200 immediately and reconcile missing data nightly.
 
 ### 2. Timeouts
 
@@ -474,6 +338,6 @@ The `data` object contains these fields:
 ## Next steps
 
 - Add a message broker like RabbitMQ between the HTTP receiver and database workers.
-- Move from `calls.json` to PostgreSQL with a unique constraint on `uuid`.
+- Move to PostgreSQL with a unique constraint on `uuid`.
 - Build the nightly reconciliation service using `GET /api/v3/calls`.
 - Ask questions in the [Hipcall Community](https://community.hipcall.com/).

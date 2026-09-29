@@ -1,6 +1,6 @@
 ---
 title: "How to Export Missed Calls with the Hipcall API"
-description: "Filter missed calls by date and status, paginate through every record, and export them to a CSV file using a C# script."
+description: "Filter missed calls by date and status, paginate through every record, and parse the JSON payload using C#."
 slug: how-to-export-missed-calls-with-the-hipcall-api
 lang: en
 locales: [en, tr]
@@ -18,9 +18,9 @@ status: review
 
 ## Overview
 
-Missed calls pile up fast in a busy call center. You can download a report from the web dashboard when you need a quick look, but if your CRM needs those records every morning at 8 AM, you need something that runs on its own.
+Missed calls pile up in a busy call center. You can download a report from the web dashboard. However, if your CRM needs those records every morning at 8 AM, you need an automated script.
 
-The Hipcall API lets you pull call detail records using flexible filters and page through all of them. This guide shows how to pull missed calls, page through the results, and write them to a CSV file using a C# script.
+The Hipcall API lets you pull call detail records using flexible filters and page through all of them. This guide shows how to pull missed calls, page through the results, and parse the data using C#.
 
 ## Before you start
 
@@ -41,7 +41,7 @@ export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
 Hipcall API list endpoints use a bracket filter syntax (`?field[operator]=value`).
 
 To get missed calls within a specific date range, combine three filters:
-- `missing_call[eq]=true`: Returns only missed calls.
+- `missing_call[eq]=true`: Returns missed calls.
 - `started_at[gte]`: Calls on or after the start date.
 - `started_at[lte]`: Calls on or before the end date.
 
@@ -54,7 +54,7 @@ curl -sS -H "Authorization: Bearer $HIPCALL_API_TOKEN" \
 
 | Filter | Operator | Value | Purpose |
 |---|---|---|---|
-| `missing_call` | `eq` | `true` | Returns only missed calls. |
+| `missing_call` | `eq` | `true` | Returns missed calls. |
 | `started_at` | `gte` | `2026-09-01T00:00:00Z` | Calls on or after the specified timestamp. |
 | `started_at` | `lte` | `2026-09-08T23:59:59Z` | Calls on or before the specified timestamp. |
 
@@ -66,7 +66,36 @@ Hipcall list endpoints return a `data` array and a `meta` object:
 
 ```json
 {
-  "data": [ ... ],
+  "data": [
+    {
+      "id": 10582,
+      "direction": "inbound",
+      "caller_number": "+1234567890",
+      "callee_number": "+1987654321",
+      "started_at": "2026-09-05T14:32:10Z",
+      "answered_at": null,
+      "ended_at": "2026-09-05T14:32:45Z",
+      "call_duration": 0,
+      "missing_call": true,
+      "status": "missed",
+      "recording_url": null,
+      "tags": ["support"]
+    },
+    {
+      "id": 10583,
+      "direction": "inbound",
+      "caller_number": "+1555123456",
+      "callee_number": "+1987654321",
+      "started_at": "2026-09-06T09:15:00Z",
+      "answered_at": null,
+      "ended_at": "2026-09-06T09:15:20Z",
+      "call_duration": 0,
+      "missing_call": true,
+      "status": "missed",
+      "recording_url": null,
+      "tags": []
+    }
+  ],
   "meta": {
     "count": 142,
     "offset": 0,
@@ -94,35 +123,33 @@ flowchart TD
     F --> G{"offset + limit < meta.count?"}
     G -- Yes --> H["offset = offset + limit"]
     H --> B
-    G -- No --> I["All records collected, write to CSV"]
+    G -- No --> I["All records collected"]
 ```
 
-If a new call arrives or is deleted while you are paging, the list shifts. You might see the same record twice or miss one on the next page.
+If a new call arrives or is deleted while you page, the list shifts. You might see the same record twice or miss one on the next page.
 
-## The full script
+## C# pagination example
 
-This C# console app fetches missed calls from the last 7 days, pages through all records, and writes them to a `missed-calls-YYYY-MM-DD.csv` file:
+This C# example fetches missed calls, pages through the records, and extracts data from the JSON payload. It relies on `System.Net.Http` and `System.Text.Json` to handle HTTP requests and JSON parsing.
 
 ```csharp
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Threading.Tasks;
 
-string? token = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN");
-if (string.IsNullOrWhiteSpace(token))
-{
-    Console.Error.WriteLine("Error: HIPCALL_API_TOKEN environment variable is not set.");
-    return 1;
-}
+// Console app setup (environment variables, etc.) is omitted for clarity
 
 const string baseUrl = "https://use.hipcall.com/api/v3/calls";
-const int pageSize = 100;
-string csvFile = $"missed-calls-{DateTime.UtcNow:yyyy-MM-dd}.csv";
-
-string from = DateTime.UtcNow.AddDays(-7).Date.ToString("yyyy-MM-ddT00:00:00Z");
-string to = DateTime.UtcNow.Date.ToString("yyyy-MM-ddT23:59:59Z");
+string fromDate = "2026-09-01T00:00:00Z";
+string toDate = "2026-09-08T23:59:59Z";
+int pageSize = 100;
 
 using var client = new HttpClient();
-client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "YOUR_API_TOKEN");
+client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
 var allCalls = new List<JsonElement>();
 int offset = 0;
@@ -131,8 +158,8 @@ int totalCount;
 do
 {
     string url = $"{baseUrl}?missing_call%5Beq%5D=true"
-               + $"&started_at%5Bgte%5D={Uri.EscapeDataString(from)}"
-               + $"&started_at%5Blte%5D={Uri.EscapeDataString(to)}"
+               + $"&started_at%5Bgte%5D={Uri.EscapeDataString(fromDate)}"
+               + $"&started_at%5Blte%5D={Uri.EscapeDataString(toDate)}"
                + $"&limit={pageSize}&offset={offset}";
 
     HttpResponseMessage response = await client.GetAsync(url);
@@ -140,51 +167,34 @@ do
 
     if (!response.IsSuccessStatusCode)
     {
-        Console.Error.WriteLine($"Error: {(int)response.StatusCode} {response.StatusCode}");
-        Console.Error.WriteLine(body);
-        return 1;
+        throw new Exception($"API Error: {(int)response.StatusCode}\n{body}");
     }
 
     using JsonDocument doc = JsonDocument.Parse(body);
-    JsonElement meta = doc.RootElement.GetProperty("meta");
+    JsonElement root = doc.RootElement;
+    
+    JsonElement meta = root.GetProperty("meta");
     totalCount = meta.GetProperty("count").GetInt32();
+    int currentLimit = meta.GetProperty("limit").GetInt32();
 
-    foreach (JsonElement call in doc.RootElement.GetProperty("data").EnumerateArray())
+    foreach (JsonElement call in root.GetProperty("data").EnumerateArray())
     {
         allCalls.Add(call.Clone());
     }
 
-    offset += meta.GetProperty("limit").GetInt32();
+    offset += currentLimit;
 
 } while (offset < totalCount);
 
-using var writer = new StreamWriter(csvFile);
-writer.WriteLine("date;caller_number;callee_number;duration_seconds");
-foreach (JsonElement call in allCalls)
-{
-    string date = call.TryGetProperty("started_at", out var s) ? s.GetString() ?? "" : "";
-    string caller = call.TryGetProperty("caller_number", out var c) ? c.GetString() ?? "" : "";
-    string callee = call.TryGetProperty("callee_number", out var e) ? e.GetString() ?? "" : "";
-    string dur = call.TryGetProperty("call_duration", out var d) ? d.ToString() : "0";
-    writer.WriteLine($"\"{date}\";\"{caller}\";\"{callee}\";{dur}");
-}
-
-Console.WriteLine($"Completed. {allCalls.Count} missed calls exported to {csvFile}.");
-return 0;
-```
-
-To run the application:
-
-```bash
-export HIPCALL_API_TOKEN="SFMyNTY.g2gDbQAAAC..."
-dotnet run
+// 'allCalls' now contains every record matching your filter
 ```
 
 ### Notes on this code
 
-- **Single HttpClient:** Create a single `HttpClient` and reuse it. Opening a new one per request inside a loop exhausts sockets.
+- **Single HttpClient:** This script uses one `HttpClient` instance. Opening a new one per request inside a loop exhausts sockets.
 - **Loop driven by meta.count:** The loop stops based on `meta.count`. Waiting for an empty page wastes an extra request and causes issues if records shift while paging.
-- **Preserving error bodies:** When a request fails, print the full response body. Using only `EnsureSuccessStatusCode()` hides the API's error message.
+- **Dynamic limit increment:** It increments `offset` by the `meta.limit` returned in the response (`currentLimit`), ensuring it correctly matches the server's pagination state.
+- **Preserving error bodies:** When a request fails, the code throws an exception with the full response body. Using `EnsureSuccessStatusCode()` hides the API's error message.
 
 ## When it fails
 
@@ -200,7 +210,7 @@ Your API token is missing, wrong, or expired:
 }
 ```
 
-Verify your API key in the developer dashboard and redefine the environment variable.
+Verify your API key in the developer dashboard and update your token.
 
 ### 422 Unprocessable Entity
 
@@ -209,7 +219,9 @@ The API rejected an unsupported filter field or an invalid value:
 ```json
 {
   "errors": {
-    "started_at": ["#/started_at/invalid_param: Unexpected field: invalid_param"]
+    "started_at": [
+      "#/started_at/invalid_param: Unexpected field: invalid_param"
+    ]
   }
 }
 ```
@@ -225,7 +237,17 @@ Common mistakes and solutions:
 
 ### 429 Too Many Requests
 
-You exceeded the rate limit (60 requests per minute). Add a short pause between pagination requests and retry.
+You exceeded the rate limit (60 requests per minute). The API returns the following error:
+
+```json
+{
+  "errors": {
+    "detail": "Too many requests. Please try again later."
+  }
+}
+```
+
+Add a pause between pagination requests and retry.
 
 ## Parameter reference
 

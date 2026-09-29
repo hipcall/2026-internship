@@ -415,7 +415,14 @@ public class CallDataPayload
     public string? Direction { get; set; }
     public string? CallerNumber { get; set; }
     public string? CalleeNumber { get; set; }
-    public string? StartedAt { get; set; }
+    public int? CallDuration { get; set; }
+    public string? RecordUrl { get; set; }
+    public string? HangupBy { get; set; }
+    public string? VoicemailId { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? AnsweredAt { get; set; }
+    public DateTime? BridgedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
 }
 
 public class TestPushCardRequest

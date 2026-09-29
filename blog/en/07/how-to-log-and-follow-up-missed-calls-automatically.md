@@ -35,6 +35,75 @@ Make sure you have these ready:
 
 To open tasks only for missed calls, you need to identify them accurately. The `call_hangup` webhook provides several fields, but relying on `missing_call` alone is not enough.
 
+You can simulate a `call_hangup` event by sending the following `curl` command to your local webhook receiver to test your implementation:
+
+```bash
+curl -X POST http://localhost:5000/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
+  -H "Content-Type: application/json" \
+  -d '{
+  "data": {
+    "credited": false,
+    "team_touch_at": null,
+    "first_touch_duration": 10,
+    "contact_id": 12345,
+    "callee_id": null,
+    "answered_at": "2026-09-29T14:13:33Z",
+    "voicemail_url": null,
+    "caller_number": "+90850XXXXXXX",
+    "missing_call_reason": "abandoned",
+    "call_duration": 12,
+    "callback_time": null,
+    "call_flow": [
+      {
+        "action": "hangup",
+        "detail": {
+          "hangup_by": "contact"
+        },
+        "timestamp": 1790691215
+      },
+      {
+        "action": "bridge",
+        "detail": {
+          "id": 4200,
+          "type": "user"
+        },
+        "timestamp": 1790691205
+      },
+      {
+        "action": "init",
+        "detail": {
+          "id": null,
+          "type": "contact"
+        },
+        "timestamp": 1790691203
+      }
+    ],
+    "direction": "inbound",
+    "callee_number": "+90530XXXXXXX",
+    "voicemail_id": null,
+    "callback_user_id": null,
+    "callee_type": "contact",
+    "ended_at": "2026-09-29T14:13:35Z",
+    "missing_call": true,
+    "channel_type": "number",
+    "callback_cdr_uuid": null,
+    "voicemail_type": null,
+    "caller_id": 4200,
+    "started_at": "2026-09-29T14:13:23Z",
+    "bridged_at": "2026-09-29T14:13:33Z",
+    "channel_id": 942,
+    "caller_type": "user",
+    "user_id": 4200,
+    "hangup_by": "contact",
+    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "record_url": "https://storage.hipcall.com/recordings/...masked...",
+    "number_id": 942,
+    "company_id": 80719
+  },
+  "event": "call_hangup"
+}'
+```
+
 When a customer calls and leaves a voicemail, the `missing_call` field is `true`. The PBX usually creates a separate task for voicemails. If your webhook receiver also opens a task based on `missing_call == true`, you generate duplicate tasks for the same call.
 
 To identify a genuine missed call, check both `missing_call` and `voicemail_id`:
@@ -51,15 +120,30 @@ You should process inbound calls only. When an agent makes an outbound call and 
 
 ## Writing the disposition
 
-Use `PUT /api/v3/calls/{call_id}/disposition` to assign a outcome to the call.
+Use `PUT /api/v3/calls/{call_id}/disposition` to assign an outcome to the call.
 
 The `GET /api/v3/dispositions` endpoint returns both an `id` and a `code` for each disposition. Always use the `code` in your integration. The `id` changes between development and production environments, while the `code` remains consistent.
 
-The smallest valid request body requires only the `disposition_code`:
+The valid request body requires only the `disposition_code`:
+
+```csharp
+var dispositionBody = new { disposition_code = "geri_arama_istendi" };
+var dispContent = new StringContent(JsonSerializer.Serialize(dispositionBody), Encoding.UTF8, "application/json");
+var response = await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
+```
+
+When successful, the API returns `200 OK` along with the assigned details:
 
 ```json
 {
-  "disposition_code": "geri_arama_istendi"
+  "data": {
+    "code": "geri_arama_istendi",
+    "name": "Geri Arama İstendi",
+    "disposition_id": 495,
+    "edit_window_minutes": 15,
+    "editable_until": "2026-09-25T11:50:43Z",
+    "editable": true
+  }
 }
 ```
 
@@ -68,6 +152,39 @@ If you send both `disposition_id` and `disposition_code`, the API returns `422 U
 ## Opening the follow-up task
 
 Use `POST /api/v3/tasks` to create a task. The `name` field is required.
+
+```csharp
+var taskBody = new Dictionary<string, object>
+{
+    ["name"] = $"Callback: {call.CallerNumber} — Missed Call",
+    ["assign_to_user_id"] = 4200,
+    ["due_date"] = DateTime.UtcNow.AddMinutes(30).ToString("yyyy-MM-ddTHH:mm:ssZ"),
+    ["contact_ids"] = new[] { 12345 },
+    ["company_ids"] = new[] { 6789 }
+};
+
+var taskContent = new StringContent(JsonSerializer.Serialize(new { data = taskBody }), Encoding.UTF8, "application/json");
+var response = await client.PostAsync("tasks", taskContent);
+```
+
+When successful, the API returns `201 Created`:
+
+```json
+{
+  "data": {
+    "id": 273905,
+    "name": "Callback: +90555XXXXXXX — Missed Call",
+    "priority": null,
+    "done": false,
+    "description": null,
+    "companies": [{"id": 6789, "name": "Acme Corp."}],
+    "contacts": [{"id": 12345, "name": "John D."}],
+    "done_at": null,
+    "due_date": "2026-09-27T15:00:00Z",
+    "assign_to_user_id": 4200
+  }
+}
+```
 
 To assign the task to an agent, send their user ID in the `assign_to_user_id` field. You can determine who should receive the task using this fallback strategy:
 
@@ -78,16 +195,6 @@ To assign the task to an agent, send their user ID in the `assign_to_user_id` fi
 To link the task directly to the caller's profile and company, provide `contact_ids` and `company_ids`. This associates the task with the contact and company pages in Hipcall.
 
 Set the `due_date` in ISO 8601 format using UTC (`Z`). If you omit the timezone offset, the API throws an "Invalid format" error.
-
-```json
-{
-  "name": "Callback: +90555XXXXXXX",
-  "assign_to_user_id": 4200,
-  "due_date": "2026-09-27T15:00:00Z",
-  "contact_ids": [12345],
-  "company_ids": [6789]
-}
-```
 
 ## Wiring it to the webhook
 
@@ -122,22 +229,34 @@ flowchart TD
     CheckTaskSuccess -- Yes --> Finish
 ```
 
-## C# Minimal API implementation
+## Minimal API receiver example
 
 The following ASP.NET Core application handles the `call_hangup` webhook event. It evaluates incoming calls, assigns the disposition code for missed calls, resolves the responsible assignee, and creates a follow-up task linked to contact and company records:
 
 ```csharp
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN environment variable is missing.");
+
 builder.Services.AddHttpClient("HipcallClient", client =>
 {
     client.BaseAddress = new Uri("https://use.hipcall.com/api/v3/");
-    client.DefaultRequestHeaders.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN"));
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
 });
 
 var app = builder.Build();
@@ -148,7 +267,9 @@ var jsonOptions = new JsonSerializerOptions
     PropertyNameCaseInsensitive = true
 };
 
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") ?? "whsec_live_secret";
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET environment variable is missing.");
+
 var defaultManagerId = 4200;
 var processedCalls = new ConcurrentDictionary<string, DateTime>();
 
@@ -195,7 +316,12 @@ app.MapPost("/hipcall/events/{secret?}", async (
         {
             var dispositionBody = new { disposition_code = "geri_arama_istendi" };
             var dispContent = new StringContent(JsonSerializer.Serialize(dispositionBody), Encoding.UTF8, "application/json");
-            await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
+            var response = await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                logger.LogError("Failed to write disposition: {Uuid}, Error: {Error}", call.Uuid, err);
+            }
         }
         catch (Exception ex)
         {
@@ -244,7 +370,12 @@ app.MapPost("/hipcall/events/{secret?}", async (
                 Encoding.UTF8,
                 "application/json");
 
-            await client.PostAsync("tasks", taskContent);
+            var response = await client.PostAsync("tasks", taskContent);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                logger.LogError("Failed to create task: {Uuid}, Error: {Error}", call.Uuid, err);
+            }
         }
         catch (Exception ex)
         {
