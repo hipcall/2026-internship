@@ -88,6 +88,22 @@ If you send a non-existent `tag_id`, the API returns `404 Not Found`. This endpo
 
 ## Step 2: Webhook rules
 
+In the previous task, you wrote a rule to catch missed calls. Now, the same webhook endpoint (`call_hangup`) will evaluate two different rules side by side:
+
+```mermaid
+flowchart TD
+    A[Webhook Event<br>call_hangup] --> B{Rule Engine}
+    
+    B --> C[Missed Call Rule]
+    B --> D[Short Call Tag Rule]
+    
+    C -->|Match| E[Missed Call API]
+    C -->|No Match| F[Skip]
+    
+    D -->|Match| G[Add Tag API]
+    D -->|No Match| H[Skip]
+```
+
 Before running the rule, verify that the call has `bridged_at` and `ended_at` values, and skip missed calls.
 
 You can send the following `curl` command to your local webhook receiver to test your application with a mock `call_hangup` event where the conversation lasted six seconds:

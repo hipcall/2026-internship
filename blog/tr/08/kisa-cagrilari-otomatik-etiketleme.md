@@ -88,6 +88,22 @@ Var olmayan bir `tag_id` gönderirseniz API `404 Not Found` döner. Bu endpoint 
 
 ## Adım 2: Webhook kuralları
 
+Bir önceki görevde cevapsız çağrıları yakalayan bir kural yazmıştınız. Artık aynı webhook uç noktanız (`call_hangup`) iki farklı kuralı yan yana değerlendirecektir:
+
+```mermaid
+flowchart TD
+    A[Webhook Olayı<br>call_hangup] --> B{Kural Motoru}
+    
+    B --> C[Cevapsız Çağrı Kuralı]
+    B --> D[Kısa Çağrı Kuralı]
+    
+    C -->|Eşleşti| E[Cevapsız Çağrı API]
+    C -->|Eşleşmedi| F[Atla]
+    
+    D -->|Eşleşti| G[Etiket Ekle API]
+    D -->|Eşleşmedi| H[Atla]
+```
+
 Kuralı işletmeden önce çağrının `bridged_at` ve `ended_at` değerlerine sahip olduğunu doğrulayın, cevapsız çağrıları es geçin.
 
 Uygulamanızı test etmek için aşağıdaki `curl` komutu ile altı saniye konuşulmuş sahte bir `call_hangup` olayını yerel sunucunuza gönderebilirsiniz:
