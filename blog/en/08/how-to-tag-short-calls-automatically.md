@@ -92,16 +92,24 @@ In the previous task, you wrote a rule to catch missed calls. Now, the same webh
 
 ```mermaid
 flowchart TD
-    A[Webhook Event<br>call_hangup] --> B{Rule Engine}
+    A[call_hangup Webhook Event] --> B(RuleEngine)
+    B --> C{MissedCallRule<br>Matches?}
+    B --> D{ShortCallTagRule<br>Matches?}
     
-    B --> C[Missed Call Rule]
-    B --> D[Short Call Tag Rule]
+    C -- Yes<br>(Missed Call) --> E[Set Disposition<br>& Create Task]
+    C -- No --> F[Skip]
     
-    C -->|Match| E[Missed Call API]
-    C -->|No Match| F[Skip]
+    D -- Yes<br>(Answered & Duration < Threshold) --> G{Who Hung Up?}
+    D -- No --> H[Skip]
     
-    D -->|Match| G[Add Tag API]
-    D -->|No Match| H[Skip]
+    G -- Agent (user) --> I[Add Agent Short Call Tag]
+    G -- Customer (contact) --> J[Add Customer Short Call Tag]
+    
+    E --> K((End))
+    F --> K
+    I --> K
+    J --> K
+    H --> K
 ```
 
 Before running the rule, verify that the call has `bridged_at` and `ended_at` values, and skip missed calls.

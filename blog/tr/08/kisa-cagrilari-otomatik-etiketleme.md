@@ -92,16 +92,24 @@ Bir önceki görevde cevapsız çağrıları yakalayan bir kural yazmıştınız
 
 ```mermaid
 flowchart TD
-    A[Webhook Olayı<br>call_hangup] --> B{Kural Motoru}
+    A[call_hangup Webhook Olayı] --> B(RuleEngine)
+    B --> C{MissedCallRule<br>Eşleşiyor mu?}
+    B --> D{ShortCallTagRule<br>Eşleşiyor mu?}
     
-    B --> C[Cevapsız Çağrı Kuralı]
-    B --> D[Kısa Çağrı Kuralı]
+    C -- Evet<br>(Cevapsız Çağrı) --> E[Sonuç Kodu Ata<br>& Görev Aç]
+    C -- Hayır --> F[Atla]
     
-    C -->|Eşleşti| E[Cevapsız Çağrı API]
-    C -->|Eşleşmedi| F[Atla]
+    D -- Evet<br>(Cevaplanmış & Süre < Eşik) --> G{Kim Kapattı?}
+    D -- Hayır --> H[Atla]
     
-    D -->|Eşleşti| G[Etiket Ekle API]
-    D -->|Eşleşmedi| H[Atla]
+    G -- Ajan (user) --> I[Ajan Kısa Çağrı Etiketi Ekle]
+    G -- Müşteri (contact) --> J[Müşteri Kısa Çağrı Etiketi Ekle]
+    
+    E --> K((Bitiş))
+    F --> K
+    I --> K
+    J --> K
+    H --> K
 ```
 
 Kuralı işletmeden önce çağrının `bridged_at` ve `ended_at` değerlerine sahip olduğunu doğrulayın, cevapsız çağrıları es geçin.
