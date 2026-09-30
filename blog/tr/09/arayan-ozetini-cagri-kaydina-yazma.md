@@ -164,7 +164,25 @@ var response = await client.PostAsync($"calls/{callUuid}/comments", jsonContent)
 
 ## Kural motoru ve yalıtım
 
-Farklı iş kurallarınız (Cevapsız çağrıyı SMS atma, kısa çağrıyı etiketleme, özet ekleme) aynı webhook (Örn: `call_hangup`) üzerinde çalışabilir. 
+Farklı iş kurallarınız (Cevapsız çağrıyı SMS atma, kısa çağrıyı etiketleme, özet ekleme) aynı webhook (Örn: `call_hangup`) üzerinde çalışabilir. Aşağıdaki şema, 3 farklı kuralın aynı webhook üzerinde nasıl birbirinden bağımsız ve asenkron çalıştığını göstermektedir.
+
+```mermaid
+flowchart TD
+    A[Webhook call_hangup geldi] --> B(HTTP 200 OK Dön)
+    A --> C{Rule Engine Çalışır}
+    
+    C --> D[MissedCallRule]
+    C --> E[ShortCallTagRule]
+    C --> F[CallerSummaryRule]
+    
+    F --> G{Müşteri Bulundu mu?}
+    G -- Evet --> H[Yorum Oluştur ve API'ye Yaz]
+    G -- Hayır --> I[Hiçbir Şey Yapma]
+    
+    D -.-> J((Hata Yalıtımı: Her kural kendi yalıtılmış ortamında çalışır))
+    E -.-> J
+    F -.-> J
+```
 
 Bir kuralın çökmesi (Örn: SMS servisinin yanıt vermemesi), diğer kuralların çalışmasını engellememelidir. Kuralları asenkron bir döngüde `try-catch` bloklarıyla yalıtın.
 

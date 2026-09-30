@@ -164,7 +164,25 @@ When the request is successful, the API returns the information of the creator a
 
 ## Rule engine and isolation
 
-Your different business rules (sending SMS for missed calls, tagging short calls, adding summaries) can run on the same webhook (e.g., `call_hangup`). 
+Your different business rules (sending SMS for missed calls, tagging short calls, adding summaries) can run on the same webhook (e.g., `call_hangup`). The following diagram illustrates how three different rules run independently and asynchronously on the same webhook.
+
+```mermaid
+flowchart TD
+    A[Webhook call_hangup received] --> B(Return HTTP 200 OK)
+    A --> C{Rule Engine Runs}
+    
+    C --> D[MissedCallRule]
+    C --> E[ShortCallTagRule]
+    C --> F[CallerSummaryRule]
+    
+    F --> G{Customer Found?}
+    G -- Yes --> H[Create Comment and Write to API]
+    G -- No --> I[Do Nothing]
+    
+    D -.-> J((Fault Isolation: Each rule runs in its own isolated context))
+    E -.-> J
+    F -.-> J
+```
 
 The failure of one rule (e.g., the SMS service not responding) should not prevent other rules from running. Isolate your rules in an asynchronous loop using `try-catch` blocks.
 
