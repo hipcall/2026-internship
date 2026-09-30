@@ -229,114 +229,93 @@ flowchart TD
     CheckTaskSuccess -- Yes --> Finish
 ```
 
-## Minimal API receiver example
+## C# rule engine architecture
 
-The following ASP.NET Core application handles the `call_hangup` webhook event. It evaluates incoming calls, assigns the disposition code for missed calls, resolves the responsible assignee, and creates a follow-up task linked to contact and company records:
+Because we will add more rules later in the series, build your application from the start using a scalable Rule Engine architecture.
+
+### 1. IPostCallRule interface
+
+Define the common interface that all rules will implement:
+
+```csharp
+using System.Threading;
+using System.Threading.Tasks;
+
+public interface IPostCallRule
+{
+    string RuleName { get; }
+    bool Matches(WebhookPayload payload);
+    Task ExecuteAsync(WebhookPayload payload, CancellationToken ct = default);
+}
+```
+
+### 2. Missed Call Rule Class
+
+The `MissedCallRule` class that catches missed calls, assigns the disposition code, and creates a task:
 
 ```csharp
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-var builder = WebApplication.CreateBuilder(args);
-
-var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
-    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN environment variable is missing.");
-
-builder.Services.AddHttpClient("HipcallClient", client =>
+public sealed class MissedCallRule : IPostCallRule
 {
-    client.BaseAddress = new Uri("https://use.hipcall.com/api/v3/");
-    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
-});
+    public string RuleName => "MissedCallRule";
 
-var app = builder.Build();
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<MissedCallRule> _logger;
+    private readonly JsonSerializerOptions _jsonOptions;
 
-var jsonOptions = new JsonSerializerOptions
-{
-    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    PropertyNameCaseInsensitive = true
-};
-
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
-    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET environment variable is missing.");
-
-var defaultManagerId = 4200;
-var processedCalls = new ConcurrentDictionary<string, DateTime>();
-
-app.MapPost("/hipcall/events/{secret?}", async (
-    string? secret,
-    HttpRequest request,
-    IHttpClientFactory httpClientFactory,
-    ILogger<Program> logger) =>
-{
-    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    public MissedCallRule(IHttpClientFactory httpClientFactory, ILogger<MissedCallRule> logger)
     {
-        return Results.Unauthorized();
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
+        _jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     }
 
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync();
-    if (string.IsNullOrWhiteSpace(rawBody))
+    public bool Matches(WebhookPayload payload)
     {
-        return Results.Ok();
+        if (payload.Data == null) return false;
+        if (payload.Event != "call_hangup") return false;
+        
+        var call = payload.Data;
+        if (call.Direction != "inbound" || !call.MissingCall || call.VoicemailId != null)
+            return false;
+
+        return true;
     }
 
-    var payload = JsonSerializer.Deserialize<WebhookPayload>(rawBody, jsonOptions);
-    if (payload?.Data == null || payload.Event != "call_hangup")
+    public async Task ExecuteAsync(WebhookPayload payload, CancellationToken ct = default)
     {
-        return Results.Ok();
-    }
-
-    var call = payload.Data;
-    if (call.Direction != "inbound" || !call.MissingCall || call.VoicemailId != null)
-    {
-        return Results.Ok();
-    }
-
-    if (!processedCalls.TryAdd($"missed:{call.Uuid}", DateTime.UtcNow))
-    {
-        return Results.Ok();
-    }
-
-    _ = Task.Run(async () =>
-    {
-        var client = httpClientFactory.CreateClient("HipcallClient");
+        var call = payload.Data!;
+        var client = _httpClientFactory.CreateClient("HipcallClient");
 
         try
         {
             var dispositionBody = new { disposition_code = "geri_arama_istendi" };
             var dispContent = new StringContent(JsonSerializer.Serialize(dispositionBody), Encoding.UTF8, "application/json");
-            var response = await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent);
-            if (!response.IsSuccessStatusCode)
-            {
-                var err = await response.Content.ReadAsStringAsync();
-                logger.LogError("Failed to write disposition: {Uuid}, Error: {Error}", call.Uuid, err);
-            }
+            await client.PutAsync($"calls/{call.Uuid}/disposition", dispContent, ct);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to write disposition: {Uuid}", call.Uuid);
+            _logger.LogError(ex, "Failed to write disposition: {Uuid}", call.Uuid);
         }
 
         try
         {
-            int assigneeId = defaultManagerId;
+            int assigneeId = 4200; // Default manager ID
             if (call.ContactId.HasValue)
             {
-                var contactResp = await client.GetAsync($"contacts/{call.ContactId.Value}");
+                var contactResp = await client.GetAsync($"contacts/{call.ContactId.Value}", ct);
                 if (contactResp.IsSuccessStatusCode)
                 {
-                    var contactData = await contactResp.Content.ReadFromJsonAsync<ContactResponse>(jsonOptions);
+                    var contactData = await contactResp.Content.ReadFromJsonAsync<ContactResponse>(_jsonOptions, ct);
                     if (contactData?.Data?.UserId.HasValue == true)
                     {
                         assigneeId = contactData.Data.UserId.Value;
@@ -356,42 +335,113 @@ app.MapPost("/hipcall/events/{secret?}", async (
                 ["due_date"] = DateTime.UtcNow.AddMinutes(30).ToString("yyyy-MM-ddTHH:mm:ssZ")
             };
 
-            if (call.ContactId.HasValue)
-            {
-                taskBody["contact_ids"] = new[] { call.ContactId.Value };
-            }
-            if (call.CompanyId.HasValue)
-            {
-                taskBody["company_ids"] = new[] { call.CompanyId.Value };
-            }
+            if (call.ContactId.HasValue) taskBody["contact_ids"] = new[] { call.ContactId.Value };
+            if (call.CompanyId.HasValue) taskBody["company_ids"] = new[] { call.CompanyId.Value };
 
             var taskContent = new StringContent(
-                JsonSerializer.Serialize(new { data = taskBody }, jsonOptions),
+                JsonSerializer.Serialize(new { data = taskBody }, _jsonOptions),
                 Encoding.UTF8,
                 "application/json");
 
-            var response = await client.PostAsync("tasks", taskContent);
-            if (!response.IsSuccessStatusCode)
-            {
-                var err = await response.Content.ReadAsStringAsync();
-                logger.LogError("Failed to create task: {Uuid}, Error: {Error}", call.Uuid, err);
-            }
+            await client.PostAsync("tasks", taskContent, ct);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to create task: {Uuid}", call.Uuid);
+            _logger.LogError(ex, "Failed to create task: {Uuid}", call.Uuid);
         }
-    });
+    }
+}
+```
+
+### 3. Application entry point (Program.cs)
+
+This clean endpoint receives the incoming webhook event and delegates it to the `RuleEngine`. No more spaghetti code!
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
+    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN environment variable is missing.");
+    
+builder.Services.AddHttpClient("HipcallClient", client =>
+{
+    client.BaseAddress = new Uri("https://use.hipcall.com/api/v3/");
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
+});
+
+// Register the rule engine and rules
+builder.Services.AddSingleton<RuleEngine>();
+builder.Services.AddSingleton<IPostCallRule, MissedCallRule>();
+
+var app = builder.Build();
+
+var jsonOptions = new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    PropertyNameCaseInsensitive = true
+};
+
+var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
+    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET environment variable is missing.");
+
+app.MapPost("/hipcall/events/{secret?}", async (
+    string? secret,
+    HttpRequest request,
+    RuleEngine ruleEngine) =>
+{
+    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    {
+        return Results.Unauthorized();
+    }
+
+    using var reader = new StreamReader(request.Body, Encoding.UTF8);
+    var rawBody = await reader.ReadToEndAsync();
+    if (string.IsNullOrWhiteSpace(rawBody)) return Results.Ok();
+
+    var payload = JsonSerializer.Deserialize<WebhookPayload>(rawBody, jsonOptions);
+    if (payload == null) return Results.Ok();
+
+    // Run the rule engine in the background
+    _ = Task.Run(() => ruleEngine.EvaluateAsync(payload));
 
     return Results.Ok();
 });
 
 app.Run();
 
-record WebhookPayload(string Event, CallData? Data);
-record CallData(string Uuid, string Direction, bool MissingCall, string? MissingCallReason, int? VoicemailId, string? CallerNumber, string? StartedAt, int? CallDuration, int? ContactId, int? CompanyId, int? UserId);
-record ContactResponse(ContactData Data);
-record ContactData(int Id, int? UserId);
+// Models
+public record WebhookPayload(string Event, CallData? Data);
+public record CallData(string Uuid, string Direction, bool MissingCall, string? MissingCallReason, int? VoicemailId, string? CallerNumber, string? StartedAt, int? CallDuration, int? ContactId, int? CompanyId, int? UserId);
+public record ContactResponse(ContactData Data);
+public record ContactData(int Id, int? UserId);
+
+// Simple RuleEngine implementation
+public class RuleEngine
+{
+    private readonly IEnumerable<IPostCallRule> _rules;
+    public RuleEngine(IEnumerable<IPostCallRule> rules) => _rules = rules;
+
+    public async Task EvaluateAsync(WebhookPayload payload)
+    {
+        foreach (var rule in _rules)
+        {
+            if (rule.Matches(payload))
+            {
+                await rule.ExecuteAsync(payload);
+            }
+        }
+    }
+}
 ```
 
 ## When it fails
