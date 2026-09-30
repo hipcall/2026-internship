@@ -358,4 +358,4 @@ The comment body (content field) is left empty or not sent. Make sure you constr
 
 ## Next steps
 
-Congratulations, you have fully integrated your call center with a CRM! You can now tag short calls, track missed calls, and summarize callers. Explore the [Hipcall API Documentation](https://developer.hipcall.com) for more integration ideas.
+Congratulations, you have fully integrated your call center with a CRM! You can now tag short calls, track missed calls, and summarize callers. Explore the [Hipcall API Documentation](https://www.hipcall.com/developers/) for more integration ideas.

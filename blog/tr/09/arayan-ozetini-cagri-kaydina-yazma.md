@@ -358,4 +358,4 @@ Yorum gövdesi (content alanı) boş bırakılmış veya gönderilmemiş. JSON g
 
 ## Sonraki adımlar
 
-Tebrikler, çağrı merkezinizi bir CRM ile tam entegre ettiniz! Artık kısa çağrıları etiketleyebilir, cevapsız çağrıları takip edebilir ve çağrıları özetleyebilirsiniz. Daha fazla entegrasyon fikri için [Hipcall API Dokümantasyonunu](https://developer.hipcall.com) inceleyin.
+Tebrikler, çağrı merkezinizi bir CRM ile tam entegre ettiniz! Artık kısa çağrıları etiketleyebilir, cevapsız çağrıları takip edebilir ve çağrıları özetleyebilirsiniz. Daha fazla entegrasyon fikri için [Hipcall API Dokümantasyonunu](https://www.hipcall.com/tr/developers/) inceleyin.
