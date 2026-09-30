@@ -102,7 +102,7 @@ curl -X POST http://localhost:5080/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
     "caller_type": null,
     "user_id": 4200,
     "hangup_by": null,
-    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "uuid": "410c92c5-...masked...",
     "record_url": null,
     "number_id": 942,
     "company_id": 80719

@@ -95,7 +95,7 @@ curl -X POST http://localhost:5000/hipcall/events/whsec_live_xxxxxxxxxxxxxxxx \
     "caller_type": "user",
     "user_id": 4200,
     "hangup_by": "contact",
-    "uuid": "410c92c5-2b61-4dd2-aa75-d3601ae51277",
+    "uuid": "410c92c5-...masked...",
     "record_url": "https://storage.hipcall.com.tr/recordings/...masked...",
     "number_id": 942,
     "company_id": 80719
