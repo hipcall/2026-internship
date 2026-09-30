@@ -195,123 +195,78 @@ Eşik değerini ve etiket ID'lerini koda gömmeyin. Dinamik değer kullanmak yen
 }
 ```
 
-## Minimal API alıcı örneği
+## C# kural sınıfı
 
-Bu ASP.NET Core uygulaması webhook olayını karşılar. Süreleri hesaplar, eşiğin altındaysa kapatan tarafa göre uygun etiketi API'ye gönderir.
+Bu kural sınıfı `IPostCallRule` arayüzünü uygular. Süreleri hesaplar, eşiğin altındaysa kapatan tarafa göre uygun etiketi API'ye gönderir.
 
 ```csharp
 using System;
-using System.IO;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-var builder = WebApplication.CreateBuilder(args);
-
-var apiToken = Environment.GetEnvironmentVariable("HIPCALL_API_TOKEN") 
-    ?? throw new InvalidOperationException("HIPCALL_API_TOKEN ortam değişkeni bulunamadı.");
-
-builder.Services.AddHttpClient("HipcallClient", client =>
+public sealed class ShortCallTagRule : IPostCallRule
 {
-    client.BaseAddress = new Uri("https://use.hipcall.com.tr/api/v3/");
-    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
-});
+    public string RuleName => "ShortCallTagRule";
 
-var app = builder.Build();
+    private readonly HipcallApiClient _api;
+    private readonly HipcallSettings _settings;
+    private readonly ILogger<ShortCallTagRule> _logger;
 
-var jsonOptions = new JsonSerializerOptions
-{
-    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-    PropertyNameCaseInsensitive = true
-};
-
-var expectedSecret = Environment.GetEnvironmentVariable("HIPCALL_WEBHOOK_SECRET") 
-    ?? throw new InvalidOperationException("HIPCALL_WEBHOOK_SECRET ortam değişkeni bulunamadı.");
-
-app.MapPost("/hipcall/events/{secret?}", async (
-    string? secret,
-    HttpRequest request,
-    IConfiguration config,
-    IHttpClientFactory httpClientFactory,
-    ILogger<Program> logger) =>
-{
-    if (string.IsNullOrEmpty(secret) || !string.Equals(secret, expectedSecret, StringComparison.Ordinal))
+    public ShortCallTagRule(
+        HipcallApiClient api,
+        IOptions<HipcallSettings> settings,
+        ILogger<ShortCallTagRule> logger)
     {
-        return Results.Unauthorized();
+        _api = api;
+        _settings = settings.Value;
+        _logger = logger;
     }
 
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync();
-    if (string.IsNullOrWhiteSpace(rawBody))
+    public bool Matches(WebhookPayload payload)
     {
-        return Results.Ok();
+        if (payload.Data == null) return false;
+        if (payload.Event != "call_hangup") return false;
+        
+        if (payload.Data.IsMissedCall) return false;
+        if (string.IsNullOrEmpty(payload.Data.BridgedAt)) return false;
+
+        return true;
     }
 
-    var payload = JsonSerializer.Deserialize<WebhookPayload>(rawBody, jsonOptions);
-    if (payload?.Data == null || payload.Event != "call_hangup")
+    public async Task ExecuteAsync(WebhookPayload payload, CancellationToken ct = default)
     {
-        return Results.Ok();
-    }
+        var call = payload.Data!;
 
-    var call = payload.Data;
-    
-    if (call.MissingCall || string.IsNullOrEmpty(call.BridgedAt) || string.IsNullOrEmpty(call.EndedAt))
-    {
-        return Results.Ok();
-    }
-
-    if (!DateTime.TryParse(call.BridgedAt, out var bridgedAt) || 
-        !DateTime.TryParse(call.EndedAt, out var endedAt))
-    {
-        return Results.Ok();
-    }
-
-    var thresholdSeconds = config.GetValue<int>("Hipcall:ShortCallThresholdSeconds", 10);
-    var agentTagId = config.GetValue<int>("Hipcall:ShortCallAgentTagId", 5618);
-    var customerTagId = config.GetValue<int>("Hipcall:ShortCallCustomerTagId", 5635);
-
-    var talkDuration = (endedAt - bridgedAt).TotalSeconds;
-
-    if (talkDuration < thresholdSeconds)
-    {
-        _ = Task.Run(async () =>
+        if (!DateTime.TryParse(call.BridgedAt, out var bridgedAt) || 
+            !DateTime.TryParse(call.EndedAt, out var endedAt))
         {
-            var tagId = call.HangupBy == "user" ? agentTagId : customerTagId;
-            if (tagId == 0) return;
+            return;
+        }
 
-            var client = httpClientFactory.CreateClient("HipcallClient");
-            var body = new { tag_id = tagId };
-            var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        var talkDurationSeconds = (endedAt - bridgedAt).TotalSeconds;
 
-            try
-            {
-                var response = await client.PostAsync($"calls/{call.Uuid}/tags", content);
-                if (!response.IsSuccessStatusCode)
-                {
-                    var err = await response.Content.ReadAsStringAsync();
-                    logger.LogError("Etiket eklenemedi: {Uuid}, Hata: {Error}", call.Uuid, err);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Etiket eklenirken hata: {Uuid}", call.Uuid);
-            }
-        });
+        if (talkDurationSeconds >= _settings.ShortCallThresholdSeconds)
+        {
+            return;
+        }
+
+        int tagId = call.HangupBy == "user" 
+            ? _settings.ShortCallAgentTagId 
+            : _settings.ShortCallCustomerTagId;
+
+        if (tagId == 0) return;
+
+        await _api.AddTagToCallAsync(call.Uuid, tagId, ct);
     }
+}
+```
 
-    return Results.Ok();
-});
+Son olarak, bu kuralı uygulamanızın kural motoruna dahil etmek için `Program.cs` dosyanıza şu kaydı ekleyin:
 
-app.Run();
-
-record WebhookPayload(string Event, CallData? Data);
-record CallData(string Uuid, bool MissingCall, string? BridgedAt, string? EndedAt, string? HangupBy);
+```csharp
+builder.Services.AddSingleton<IPostCallRule, ShortCallTagRule>();
 ```
 
 ## Hata aldığınızda
