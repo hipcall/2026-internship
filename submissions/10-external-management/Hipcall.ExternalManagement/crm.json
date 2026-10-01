@@ -1,0 +1,35 @@
+[
+  {
+    "external_id": "CRM-2",
+    "phone": "+1425XXXXXXX",
+    "first_name": "Bill",
+    "last_name": "G.",
+    "company": "Esternio",
+    "balance": 0.0,
+    "open_orders": 0,
+    "open_tickets": 2,
+    "pin": "****"
+  },
+  {
+    "external_id": "CRM-3",
+    "phone": "+1425XXXXXXX",
+    "first_name": "Billn",
+    "last_name": "G.",
+    "company": "Esternio",
+    "balance": 340.50,
+    "open_orders": 3,
+    "open_tickets": 1,
+    "pin": "****"
+  },
+  {
+    "external_id": "CRM-4",
+    "phone": "+90551XXXXXXX",
+    "first_name": "Fabsava",
+    "last_name": "A.",
+    "company": "Esternio",
+    "balance": 111.0,
+    "open_orders": 2,
+    "open_tickets": 6,
+    "pin": "****"
+  }
+]

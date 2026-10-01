@@ -15,7 +15,7 @@ draft: true
 task: 08
 status: draft
 ---
-
+  
 ## Genel bakış
 
 8 saniye süren ve cevaplanmış bir çağrı raporlarda "başarılı" görünür. Gerçekte 8 saniyede hiçbir iş konuşulmaz. Bu çağrılar yanlış numara, ses gelmemesi veya ajanın hattı erken kapatması gibi sorunlara işaret eder.
