@@ -67,6 +67,10 @@ Gelen JSON gövdesindeki alanlar:
 ### B7. Kaydın Durum Değişimi (Art Arda Hata Durumu)
 - Yapılan testlerde, sunucu tarafında kasıtlı olarak art arda 10 kez `500 Internal Server Error` (Sunucu Hatası) döndürülmesine rağmen, Hipcall panelindeki External Manager kaydı otomatik olarak "Devredışı" (Pasif) duruma düşmemiştir. Sistem, servisin bozuk olduğunu varsaymasına rağmen çağrıları "Varsayılan Hedef"e (800 vb.) yönlendirmeye (fallback) inatla devam etmektedir. Otomatik bir devredışı bırakma mekanizması (circuit breaker) bulunmamaktadır.
 
+### B8. Durum Yönetimi (Stateless Tasarım) ve Yeniden Başlatma
+- Hipcall'un sunduğu bu API tamamen durumsuz (stateless) çalışmaya uygundur. Çağrının o anki durumu ve tuşlanan veriler (`data` objesi) Hipcall tarafından her istekte tekrar gönderilir.
+- **Sonuç:** Uygulama `gather` komutunu gönderdikten sonra (kullanıcı tuşlama yaparken) yeniden başlatılırsa veya çökerse, ikinci istek geldiğinde hiçbir çağrı kopmaz veya hata alınmaz. Kodunuz sadece gelen `data`'ya bakarak bellek (in-memory) kullanmadan doğrudan yönlendirmeyi yapmaya devam eder.
+
 ---
 
 ## Bölüm C — Cevap Sözleşmesi (Keşif Notları)

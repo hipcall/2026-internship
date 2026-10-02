@@ -485,6 +485,12 @@ When your service returns a `500 Internal Server Error`, Hipcall does not drop t
 
 Even if your service returns `200 OK`, Hipcall cannot process the response if the JSON body is empty (`{}`), uses a different key instead of `seq`, or is structurally broken. The dashboard logs show a `422 Unprocessable Entity` with an `Invalid payload format` message. The call is routed to the default target.
 
+### State management and restarts
+
+Notice that we didn't use a list or a `Dictionary` (in-memory state) in our C# code to track the call steps. Hipcall's External Management design allows you to build completely stateless applications. All the state information you need (`uuid`, `caller`, and `data`) is sent to you by Hipcall on every request.
+
+Thanks to this architecture, if your server crashes or restarts while waiting for the caller to enter their PIN after sending a `gather` command, the call **does not drop**. When the user finishes dialling, Hipcall sends the second request, and your freshly started server reads the value from the `data` object and connects the call seamlessly. This allows your application to be updated with zero downtime and scale horizontally (Load Balancer) without losing ongoing calls.
+
 ## When it fails
 
 **422 Unprocessable Entity — Invalid payload format**
