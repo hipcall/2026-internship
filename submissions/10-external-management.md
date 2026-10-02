@@ -71,6 +71,11 @@ Gelen JSON gövdesindeki alanlar:
 - Hipcall'un sunduğu bu API tamamen durumsuz (stateless) çalışmaya uygundur. Çağrının o anki durumu ve tuşlanan veriler (`data` objesi) Hipcall tarafından her istekte tekrar gönderilir.
 - **Sonuç:** Uygulama `gather` komutunu gönderdikten sonra (kullanıcı tuşlama yaparken) yeniden başlatılırsa veya çökerse, ikinci istek geldiğinde hiçbir çağrı kopmaz veya hata alınmaz. Kodunuz sadece gelen `data`'ya bakarak bellek (in-memory) kullanmadan doğrudan yönlendirmeyi yapmaya devam eder.
 
+**Gerçek Telefon Testi (02.10.2026):**
+
+1. **Servis kapalıyken (Fallback testi):** Kayıtlı numaradan arandı → servis `gather` gönderdi → PIN girmeden uygulama kapatıldı (yeniden başlatılmadı) → Hipcall karşıda sunucu bulamadı → çağrıyı varsayılan hedefe (800 - "Firmamıza hoş geldiniz") yönlendirdi. **Çağrı kopmadı, güvenlik ağı çalıştı.** ✅
+2. **Stateless restart testi:** Kayıtlı numaradan arandı → servis `gather` gönderdi → PIN girmeden uygulama kapatılıp hemen yeniden başlatıldı (`dotnet run`) → PIN tuşlandı → yeni kalkan sunucu `data.pin_code` değerini okudu ve çağrıyı doğru hedefe yönlendirdi. **Çağrı kopmadı, stateless tasarım kanıtlandı.** ✅
+
 ---
 
 ## Bölüm C — Cevap Sözleşmesi (Keşif Notları)

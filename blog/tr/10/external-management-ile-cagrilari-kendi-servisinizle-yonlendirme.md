@@ -485,11 +485,11 @@ Servisiniz `500 Internal Server Error` döndüğünde Hipcall çağrıyı düş�
 
 Servisiniz `200 OK` döndürse bile JSON gövdesi boş (`{}`), `seq` yerine farklı bir anahtar içeriyorsa veya yapısal olarak bozuksa Hipcall bunu işleyemez. Paneldeki loglarda `422 Unprocessable Entity` ve `Invalid payload format` hatası görünür. Çağrı yine varsayılan hedefe aktarılır.
 
-### Durum yönetimi (State management) ve yeniden başlatma
+### Durum yönetimi ve yeniden başlatma
 
-Dikkat ederseniz C# kodumuzda çağrının hangi adımda olduğunu takip etmek için bir liste veya `Dictionary` (In-Memory state) kullanmadık. Hipcall'un External Management tasarımı tamamen durumsuz (stateless) çalışmaya uygundur. İhtiyaç duyduğunuz tüm durum bilgisi (`uuid`, `caller` ve `data`) Hipcall tarafından size her istekte tekrar gönderilir.
+Yukarıdaki C# kodunda çağrının hangi adımda olduğunu bellekte tutan bir `Dictionary` veya liste yok. Buna gerek de yok. Hipcall, her POST isteğinde çağrının tüm bağlamını (`uuid`, `caller`, `data`) size tekrar gönderir. Servisiniz durumsuz (stateless) kalabilir.
 
-Bu mimari sayesinde, kodunuz `gather` komutunu gönderip arayandan tuşlama beklerken sunucunuz çöker veya yeniden başlarsa (restart) çağrılar **kopmaz**. Kullanıcı tuşlamayı bitirdiğinde Hipcall ikinci isteği gönderir ve yeni kalkan sunucunuz `data` objesindeki değere bakarak çağrıyı sorunsuz şekilde bağlar. Bu, uygulamanızın kesintisiz güncellenebilmesini ve yatayda kolayca ölçeklenebilmesini (Load Balancer) sağlar.
+Bunun pratik anlamı şu: Servisiniz `gather` komutu gönderip arayanın tuşlama yapmasını beklerken çöker veya güncelleme için yeniden başlarsa, devam eden çağrılar **kopmaz**. Arayan tuşlamayı bitirdiğinde Hipcall ikinci isteği atar ve yeni kalkan sunucu `data` objesindeki değere bakarak çağrıyı bağlar. Bu yapı, uygulamanızı kesintisiz güncelleyebilmenizi ve birden fazla sunucu arkasında (Load Balancer) yatay ölçekleyebilmenizi sağlar.
 
 ## Hata aldığınızda
 

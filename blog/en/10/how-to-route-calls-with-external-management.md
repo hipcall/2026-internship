@@ -487,9 +487,9 @@ Even if your service returns `200 OK`, Hipcall cannot process the response if th
 
 ### State management and restarts
 
-Notice that we didn't use a list or a `Dictionary` (in-memory state) in our C# code to track the call steps. Hipcall's External Management design allows you to build completely stateless applications. All the state information you need (`uuid`, `caller`, and `data`) is sent to you by Hipcall on every request.
+The C# code above does not use a `Dictionary` or any in-memory store to track where a call is in the flow. It does not need to. Hipcall sends the full call context (`uuid`, `caller`, `data`) on every POST request. Your service can stay completely stateless.
 
-Thanks to this architecture, if your server crashes or restarts while waiting for the caller to enter their PIN after sending a `gather` command, the call **does not drop**. When the user finishes dialling, Hipcall sends the second request, and your freshly started server reads the value from the `data` object and connects the call seamlessly. This allows your application to be updated with zero downtime and scale horizontally (Load Balancer) without losing ongoing calls.
+What this means in practice: if your server crashes or restarts for an update while the caller is entering their PIN after a `gather` command, ongoing calls **do not drop**. When the caller finishes dialling, Hipcall sends the second request, and the freshly started server reads the value from the `data` object and connects the call. This lets you deploy updates with zero downtime and scale horizontally behind a load balancer without losing active calls.
 
 ## When it fails
 
